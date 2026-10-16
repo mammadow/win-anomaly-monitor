@@ -1,0 +1,12 @@
+# Runtime data: telemetry, events, model, logs (personal; never commit)
+data/
+*.log
+
+# Local settings (copy config.example.toml → config.toml)
+config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.tmp

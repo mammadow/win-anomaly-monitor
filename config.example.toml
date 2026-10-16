@@ -1,0 +1,47 @@
+# Copy to config.toml and change only what you need; everything else keeps
+# its default (see resmon/config.py for the full list). Restart the monitor
+# after editing.
+
+# ── ML sensitivity ────────────────────────────────────────────────────
+# How rare a 10-second window must be, compared with your own history, to
+# count as anomalous: 0.001 = rarer than 99.9 % of past windows.
+#   more alerts  ← 0.005 · 0.002 · 0.001 · 0.0005 →  fewer alerts
+# Run `python monitor.py tune` to see what each value would have done on
+# your recorded history before changing it.
+# alert_quantile = 0.001
+
+# Consecutive anomalous windows needed before an event opens (3 × 10 s = 30 s).
+# min_consecutive_windows = 3
+
+# ML events stay "info" until the model has this many hours of history.
+# ml_mature_hours = 24
+
+# ── Rules ─────────────────────────────────────────────────────────────
+# ram_pressure_percent = 90
+# commit_pressure_percent = 90
+# gpu_temp_warn_c = 87
+# gpu_throttle_min_temp_c = 75   # driver "thermal throttling" flags below this are ignored
+
+# A process that isn't the app you're using, averaging this many logical
+# cores for this long, is reported as a background CPU hog.
+# background_cpu_cores = 0.8
+# background_cpu_minutes = 5
+
+# Private-memory growth (MB) over at least an hour that counts as a leak.
+# leak_min_growth_mb = 500
+# handle_absolute_limit = 100000   # any process holding more handles is reported
+# handle_growth_min_count = 10000  # steady handle growth matters only above this
+
+# Processes you never want blamed (case-insensitive executable names).
+# ignore_processes = ["MsMpEng.exe", "SearchIndexer.exe"]
+
+# ── Notifications ─────────────────────────────────────────────────────
+# Windows toast notifications for events at or above notify_min_severity
+# ("info", "warning" or "critical").
+# notify = true
+# notify_min_severity = "warning"
+
+# ── Storage ───────────────────────────────────────────────────────────
+# raw_retention_hours = 48      # 1 Hz samples, ~20 MB/day
+# window_retention_days = 14    # 10 s windows (the model's memory)
+# event_retention_days = 180

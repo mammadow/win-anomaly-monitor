@@ -1,0 +1,6 @@
+psutil>=5.9
+numpy>=1.24
+nvidia-ml-py>=12.535      # NVIDIA GPU metrics (provides the `pynvml` module); optional
+
+# development only
+pytest>=8

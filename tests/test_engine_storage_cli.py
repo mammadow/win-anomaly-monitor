@@ -1,0 +1,219 @@
+import dataclasses
+import json
+import math
+import threading
+import time
+
+import numpy as np
+import pytest
+
+from conftest import make_sample
+from resmon.cli import main
+from resmon.detector import fit_model
+from resmon.engine import InstanceLock, Monitor
+from resmon.processes import ProcessTracker
+from resmon.storage import (Storage, db_summary, load_training_windows, load_windows,
+                            query_events)
+from resmon.winapi import ProcInfo
+
+
+class SimSampler:
+    """Idle laptop with small noise; `overrides` simulate incidents."""
+
+    def __init__(self, seed=0):
+        self.rng = np.random.default_rng(seed)
+        self.overrides: dict = {}
+        self.fail_next = False
+        self.resets = 0
+
+    def sample(self, ts):
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("simulated sensor failure")
+        r = self.rng
+        s = make_sample(ts, cpu_pct=float(r.gamma(2, 1.5)), core_max_pct=float(r.normal(20, 5)),
+                        disk_write_bps=float(r.lognormal(11, 1)), net_recv_bps=float(r.lognormal(8, 1)),
+                        user_idle_sec=float(r.choice([2.0, 600.0])))
+        s.update(self.overrides)
+        return s
+
+    def reset_rates(self):
+        self.resets += 1
+
+
+class SimProcs(ProcessTracker):
+    """Real ProcessTracker logic over a synthetic process table."""
+
+    def __init__(self):
+        super().__init__()
+        self.table = {
+            100: ProcInfo(100, "explorer.exe", 1.0, 0.0, 200 << 20, 150 << 20, 0, 0, 40, 3000),
+            200: ProcInfo(200, "backup.exe", 1.0, 0.0, 100 << 20, 80 << 20, 0, 0, 10, 400),
+        }
+
+    def snapshot(self):
+        return [dataclasses.replace(p) for p in self.table.values()]   # fresh objects, like the OS
+
+    def advance(self, pid, dt, cores=0.0, write_bps=0.0):
+        p = self.table[pid]
+        p.cpu_time += cores * dt
+        p.write_bytes += int(write_bps * dt)
+
+
+def simulate(m, sampler, procs, t0, seconds, on_tick=None):
+    t = t0
+    for i in range(int(seconds)):
+        if on_tick:
+            on_tick(t)
+        procs.advance(100, 1.0, cores=0.02)
+        m.tick(now=t, mono=t)
+        t += 1.0
+    return t
+
+
+@pytest.fixture
+def sim(cfg, monkeypatch):
+    sampler, procs = SimSampler(), SimProcs()
+    m = Monitor(cfg, sampler=sampler, procs=procs, gpu=None)
+    monkeypatch.setattr(m, "_start_training", lambda now: None)   # tests drive training directly
+    yield m, sampler, procs
+    m.storage.close()
+
+
+def test_end_to_end_disk_storm_is_detected_and_attributed(sim, cfg):
+    m, sampler, procs = sim
+    t0 = time.time()
+    t = simulate(m, sampler, procs, t0, 2 * 3600)                 # 2 h of quiet history
+    m.storage.flush()
+    ts, raw = load_training_windows(m.db_path, 0, 100_000)
+    assert len(raw) >= 700
+    m.model = fit_model(raw, ts, alert_quantile=cfg.alert_quantile, window_sec=cfg.window_sec)
+
+    t = simulate(m, sampler, procs, t, 300)                        # still quiet: nothing fires
+    assert not query_events(m.db_path, 0, ["anomaly"])
+
+    sampler.overrides = {"disk_write_bps": 300e6}
+    t = simulate(m, sampler, procs, t, 120,
+                 on_tick=lambda _: procs.advance(200, 1.0, cores=0.6, write_bps=300e6))
+    sampler.overrides = {}
+    simulate(m, sampler, procs, t, 180)
+    m.storage.flush()
+
+    [ev] = query_events(m.db_path, 0, ["anomaly"])
+    assert not ev["is_open"]
+    assert "disk write" in ev["title"] and "backup.exe" in ev["title"]
+    assert ev["details"]["why"][0]["feature"] == "disk_write_bps"
+    assert 90 <= ev["ts_end"] - ev["ts_start"] <= 150
+    line = json.loads((cfg.data_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert line["id"] == ev["id"] and line["kind"] == "anomaly"
+
+
+def test_sleep_gap_rebaselines_without_alerts(sim):
+    m, sampler, procs = sim
+    t = simulate(m, sampler, procs, time.time(), 60)
+    t = simulate(m, sampler, procs, t + 3600, 30)                  # resumed an hour later
+    assert sampler.resets == 1
+    assert m.grace_until > t - 30
+
+
+def test_samples_windows_and_nan_roundtrip(sim):
+    m, sampler, procs = sim
+    simulate(m, sampler, procs, 1_000_000.0, 35)
+    m.storage.flush()
+    s = db_summary(m.db_path)
+    assert s["samples"]["n"] == 35 and s["windows"]["n"] == 3
+    assert s["latest_sample"]["gpu_temp_c"] is None                 # NaN stored as NULL
+    rows = load_windows(m.db_path, 0)
+    assert [r["ts"] for r in rows] == sorted(r["ts"] for r in rows)
+    assert math.isnan(rows[0]["gpu_temp_c"])
+
+
+def test_reader_can_query_while_monitor_holds_the_db(tmp_path):
+    st = Storage(tmp_path / "m.db")
+    st.add_sample(make_sample(1.0))
+    st.flush()
+    assert db_summary(tmp_path / "m.db")["samples"]["n"] == 1     # separate read-only connection
+    st.close()
+
+
+def test_prune_respects_retention(tmp_path):
+    st = Storage(tmp_path / "m.db")
+    now = 10_000_000.0
+    for ts in (now - 50 * 3600, now - 3600):
+        st.add_sample(make_sample(ts))
+    st.flush()
+    eid = st.insert_event("x", "info", now - 400 * 86400, "old", {})
+    st.update_event(eid, severity="info", ts_end=now - 400 * 86400, is_open=False, title="old", details={})
+    assert st.prune(now, raw_hours=48, window_days=14, event_days=180) == 2
+    st.close()
+
+
+def test_run_loop_survives_errors_and_stops_cleanly(tmp_path):
+    from resmon.config import MonitorConfig
+    cfg = MonitorConfig(data_dir=str(tmp_path), sample_interval_sec=0.05, window_sec=1,
+                        process_interval_sec=0.2, efficiency_mode=False)
+    sampler = SimSampler()
+    m = Monitor(cfg, sampler=sampler, procs=SimProcs(), gpu=None)
+    sampler.fail_next = True
+    threading.Timer(1.5, m.stop).start()
+    m.run()
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["stopped"] and state["samples_this_run"] > 10
+
+
+def test_background_training_produces_and_saves_a_model(cfg):
+    m = Monitor(cfg, sampler=SimSampler(), procs=SimProcs(), gpu=None)
+    simulate(m, m.sampler, m.procs, 2_000_000.0, 400 * 10)          # 400 windows
+    m.storage.flush()
+    m.cfg.min_training_hours = 0.5
+    m._start_training(2_000_000.0 + 4000)
+    deadline = time.time() + 60
+    model = None
+    while model is None and time.time() < deadline:
+        time.sleep(0.2)
+        model = m.trainer.poll()
+    m.storage.close()
+    assert model is not None and model.n_windows >= 390
+    assert (cfg.data_path / "model.npz").exists()
+
+
+def test_instance_lock_is_exclusive(tmp_path):
+    a = InstanceLock(tmp_path / "x.lock")
+    assert a.acquire()
+    assert InstanceLock.is_held(tmp_path / "x.lock")
+    a.release()
+    assert not InstanceLock.is_held(tmp_path / "x.lock")
+
+
+def test_cli_status_report_reset(sim, cfg, capsys):
+    m, sampler, procs = sim
+    simulate(m, sampler, procs, time.time(), 30)
+    m.events.point("handle_leak", "warning", "leaky.exe holds 500,000 handles", time.time(), {"handles": 500000})
+    m.storage.close()
+    d = str(cfg.data_path)
+
+    assert main(["--data-dir", d, "status"]) == 0
+    out = capsys.readouterr().out
+    assert "NOT RUNNING" in out and "learning baseline" in out and "1 event" in out
+
+    assert main(["--data-dir", d, "report"]) == 0
+    out = capsys.readouterr().out
+    assert "leaky.exe holds 500,000 handles" in out and "WARNING" in out
+
+    assert main(["--data-dir", d, "report", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)[0]["kind"] == "handle_leak"
+
+    assert main(["--data-dir", d, "reset", "--yes"]) == 0
+    assert not (cfg.data_path / "metrics.db").exists()
+    m.storage = Storage(cfg.data_path / "metrics.db")             # let the fixture close something
+
+
+def test_leak_alerts_are_not_repeated_after_a_monitor_restart(cfg):
+    procs = SimProcs()
+    procs.table[300] = ProcInfo(300, "AcerSystemCentralService.exe", 5.0, 0.0, 1 << 20, 1 << 20, 0, 0, 5, 900_000)
+    for run in range(2):
+        m = Monitor(cfg, sampler=SimSampler(), procs=procs, gpu=None)
+        simulate(m, m.sampler, procs, time.time() + run * 100, 5)
+        m.storage.close()
+    events = query_events(cfg.data_path / "metrics.db", 0, ["handle_leak"])
+    assert len(events) == 1 and "900,000 handles" in events[0]["title"]
