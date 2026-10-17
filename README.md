@@ -144,6 +144,14 @@ The 1 Hz samples also record **DPC and interrupt time**, system-wide and for the
 `NtQuerySystemInformation(SystemProcessorPerformanceInformation)` (PDH counters are disabled on
 this machine). A driver storm on one core can freeze the UI while total CPU looks idle.
 
+**Sleep vs. stalls.** When more than 5 s pass between two 1 Hz samples, the monitor checks two
+clocks: one that keeps counting while the machine sleeps and one that doesn't. If they diverged by
+≥ 1 s, the machine slept. Open events are closed, rate baselines are reset, and the ML stays quiet
+for 2 minutes while the resume burst settles. A wall-clock change is handled the same way. If they
+advanced together, the monitor's own low-priority loop was starved (e.g. a full CPU) or the whole
+system stalled. That's logged as `Main loop stalled for …` and nothing is reset, since those seconds
+may be part of the problem being investigated.
+
 **Footprint** (measured here): about 0.8 % of one core (0.03 % of the whole CPU),
 around 70 MB of RAM and about 7 ms per tick. It runs at below-normal priority in
 Windows 11 Efficiency Mode (E-cores). `status` shows the live overhead. The UI probe helper adds

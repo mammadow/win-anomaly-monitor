@@ -17,6 +17,10 @@ Lifecycle
   * Sleep/hibernate is detected as a gap between ticks: rate baselines are
     reset and the ML stays quiet for a grace period (resume = burst of
     updates/sync that isn't worth an alert).
+  * A gap with no sleep in it (the boot clock and the sleep-excluding clock
+    advanced together) is the low-priority loop starved under load, or a
+    system stall. It's logged as a stall and changes nothing else: those
+    seconds are evidence, not a resume.
   * One failing tick is logged and skipped; it never kills the monitor
     (v2 died on a negative time.sleep() after 4 days).
 """
@@ -53,6 +57,20 @@ LOCK_NAME = "monitor.lock"
 LOG_NAME = "monitor.log"
 
 GPU_CLIENT_TTL = 300  # seconds a GPU-using process stays in the "clients" list
+
+
+def _stalled(gap: float, before: tuple[float, float] | None, after: tuple[float, float] | None) -> bool:
+    """
+    Was a long gap between ticks the loop being starved rather than sleep or a
+    clock change? Yes if the machine stayed awake (the boot clock and the
+    sleep-excluding clock advanced together) and the wall clock agrees with
+    the boot clock. Without the clocks (not Windows) it's treated as sleep.
+    """
+    if not before or not after:
+        return False
+    elapsed = after[0] - before[0]
+    slept = elapsed - (after[1] - before[1])
+    return slept < 1.0 and abs(gap - elapsed) < 1.0
 
 
 class InstanceLock:
@@ -138,6 +156,7 @@ class Monitor:
         self.n_samples = self.n_windows = 0
         self._gpu_clients: dict[int, tuple[int, float]] = {}
         self._last_tick: float | None = None
+        self._last_clocks: tuple[float, float] | None = None
         self._next_sweep = 0.0
         self._next_flush = 0.0
         self._next_train = 0.0
@@ -154,13 +173,19 @@ class Monitor:
         now = time.time() if now is None else now
         mono = time.monotonic() if mono is None else mono
 
+        clocks = winapi.sleep_clocks()
         if self._last_tick is not None:
             gap = now - self._last_tick
             if gap > max(5.0, 5 * self.cfg.sample_interval_sec) or gap < -1.0:
-                self._last_tick = now
-                self._on_gap(now, gap)
-                return
-        self._last_tick = now
+                if not _stalled(gap, self._last_clocks, clocks):
+                    self._last_tick, self._last_clocks = now, clocks
+                    self._on_gap(now, gap)
+                    return
+                # Rate counters are deltas over monotonic time, so the next readings
+                # are honest averages over the stall: nothing to re-baseline.
+                logging.info("Main loop stalled for %s (CPU starved or system stall) — "
+                             "events and ML carry on", fmt_duration(gap))
+        self._last_tick, self._last_clocks = now, clocks
 
         s = self.sampler.sample(now)
         self.storage.add_sample(s)

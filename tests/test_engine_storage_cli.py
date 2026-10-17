@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 import math
 import sys
 import threading
@@ -9,10 +10,12 @@ import numpy as np
 import pytest
 
 from conftest import make_sample
+from resmon import winapi
 from resmon.cli import main
 from resmon.detector import fit_model
 from resmon.engine import InstanceLock, Monitor
 from resmon.processes import ProcessTracker
+from resmon.rules import Detector
 from resmon.storage import (Storage, db_summary, load_training_windows, load_windows,
                             query_events)
 from resmon.winapi import ProcInfo
@@ -109,12 +112,65 @@ def test_end_to_end_disk_storm_is_detected_and_attributed(sim, cfg):
     assert line["id"] == ev["id"] and line["kind"] == "anomaly"
 
 
-def test_sleep_gap_rebaselines_without_alerts(sim):
+class FakeClocks:
+    """winapi.sleep_clocks() that follows the simulated wall clock."""
+
+    def __init__(self):
+        self.up = self.asleep = self.wall_offset = 0.0
+
+    def follow(self, t):
+        self.up = t - self.wall_offset
+
+    def __call__(self):
+        return self.up, self.up - self.asleep
+
+
+@pytest.fixture
+def clocks(monkeypatch):
+    c = FakeClocks()
+    monkeypatch.setattr(winapi, "sleep_clocks", c)
+    return c
+
+
+class ResetSpy(Detector):
+    resets = 0
+
+    def reset(self):
+        self.resets += 1
+
+
+@pytest.mark.parametrize("cause", ["slept", "clock set forward", "clock set back", "not windows"])
+def test_sleep_gap_rebaselines_without_alerts(sim, clocks, monkeypatch, cause):
     m, sampler, procs = sim
-    t = simulate(m, sampler, procs, time.time(), 60)
-    t = simulate(m, sampler, procs, t + 3600, 30)                  # resumed an hour later
+    if cause == "not windows":                                      # no clocks: every gap counts as sleep
+        monkeypatch.setattr(winapi, "sleep_clocks", lambda: None)
+    t = simulate(m, sampler, procs, time.time(), 60, on_tick=clocks.follow)
+    ev = m.events.open("test", "info", "ongoing", t, {})
+    jump = -3600 if cause == "clock set back" else 3600
+    if cause == "slept":
+        clocks.asleep += jump
+    elif cause.startswith("clock"):
+        clocks.wall_offset += jump
+    t = simulate(m, sampler, procs, t + jump, 30, on_tick=clocks.follow)   # an hour later by the wall clock
     assert sampler.resets == 1
     assert m.grace_until > t - 30
+    assert not ev.is_open
+
+
+def test_starved_loop_is_logged_as_a_stall_not_sleep(sim, clocks, caplog):
+    m, sampler, procs = sim
+    spy = ResetSpy(m)
+    m.detectors.append(spy)
+    t = simulate(m, sampler, procs, time.time(), 60, on_tick=clocks.follow)
+    ev = m.events.open("test", "info", "ongoing", t, {})
+    grace, n = m.grace_until, m.n_samples
+    with caplog.at_level(logging.INFO):
+        simulate(m, sampler, procs, t + 12, 30, on_tick=clocks.follow)   # held up 13 s, machine awake
+    assert "Main loop stalled for 13s" in caplog.text
+    assert "sleep/hibernate" not in caplog.text
+    assert ev.is_open and spy.resets == 0 and sampler.resets == 0
+    assert m.grace_until == grace
+    assert m.n_samples == n + 30                                    # the late tick still took its sample
 
 
 def test_samples_windows_and_nan_roundtrip(sim):
