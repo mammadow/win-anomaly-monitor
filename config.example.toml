@@ -22,6 +22,11 @@
 # gpu_temp_warn_c = 87
 # gpu_throttle_min_temp_c = 75   # driver "thermal throttling" flags below this are ignored
 
+# Warn when the system drive has less than this many GB free, or less than
+# this percentage of the drive free (either one triggers; 0 turns a test off).
+# low_disk_free_gb = 20
+# low_disk_free_percent = 10
+
 # A process that isn't the app you're using, averaging this many logical
 # cores for this long, is reported as a background CPU hog.
 # background_cpu_cores = 0.8

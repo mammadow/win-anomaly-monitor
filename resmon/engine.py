@@ -2,7 +2,7 @@
 The orchestrator: one `tick()` per second.
 
   sample ─┬─ store (1 Hz)
-          ├─ rules (memory pressure, GPU thermal, dGPU-on-battery)
+          ├─ rules (memory pressure, GPU thermal, dGPU-on-battery, low disk space)
           ├─ every 5 s: process sweep → rules (background CPU, leaks)
           └─ every 10 s: window → ML score → anomaly episodes → store
 
@@ -37,7 +37,7 @@ from .events import EventManager, Notifier, fmt_duration
 from .features import WindowAggregator, to_matrix
 from .processes import ProcessTracker
 from .rules import (AnomalyEpisodes, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, Leaks,
-                    MemoryPressure)
+                    LowDiskSpace, MemoryPressure)
 from .sampler import GpuSampler, SystemSampler
 from .storage import Storage, load_training_windows
 
@@ -119,6 +119,7 @@ class Monitor:
             MemoryPressure(self),
             GpuThermal(self),
             GpuAwakeOnBattery(self),
+            LowDiskSpace(self),
             BackgroundCpu(self),
             Leaks(self),
         ]

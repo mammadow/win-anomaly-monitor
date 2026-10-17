@@ -281,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("-H", "--hours", type=float, default=24, help="look back this many hours (default 24)")
     rp.add_argument("-k", "--kind", action="append",
                     help="only these event kinds (anomaly, memory_pressure, gpu_thermal, "
-                         "gpu_awake_on_battery, background_cpu, memory_leak, handle_leak)")
+                         "gpu_awake_on_battery, low_disk_space, background_cpu, memory_leak, handle_leak)")
     rp.add_argument("-v", "--verbose", action="store_true", help="show every detail")
     rp.add_argument("--json", action="store_true", help="machine-readable output")
     sub.add_parser("tune", help="replay your history to see how many alerts each sensitivity gives")

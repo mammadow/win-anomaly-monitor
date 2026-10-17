@@ -55,6 +55,9 @@ class MonitorConfig:
     commit_pressure_percent: float = 90     # Windows commit charge (RAM + pagefile)
     memory_pressure_sec: float = 60
 
+    low_disk_free_gb: float = 20            # system drive: warn when less than this is free…
+    low_disk_free_percent: float = 10       # …or less than this share of the drive (0 turns a test off)
+
     gpu_temp_warn_c: float = 87             # RTX 4070 Laptop target max is 87 °C
     gpu_throttle_min_temp_c: float = 75     # driver "thermal" flags below this are ignored (spurious at idle)
     gpu_thermal_sec: float = 30             # sustained thermal throttling / overheat
@@ -97,6 +100,8 @@ class MonitorConfig:
             raise ValueError("window_sec must hold at least two samples")
         if self.min_consecutive_windows < 1 or self.close_after_normal_windows < 1:
             raise ValueError("window counts must be ≥ 1")
+        if self.low_disk_free_gb < 0 or not 0 <= self.low_disk_free_percent < 100:
+            raise ValueError("low_disk_free_gb must be ≥ 0 and low_disk_free_percent in [0, 100)")
         if self.notify_min_severity not in SEVERITIES:
             raise ValueError(f"notify_min_severity must be one of {SEVERITIES}")
         self.ignore_processes = [n.lower() for n in self.ignore_processes]

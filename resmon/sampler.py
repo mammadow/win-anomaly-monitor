@@ -10,12 +10,17 @@ Fixes over v2:
     is a state, not "temperature 0 °C". It is reported as gpu_awake=0 with
     temperature unknown, instead of feeding 0↔47 °C jumps to the model.
   * Physically impossible GPU readings (a 590 W spike was recorded) are dropped.
+
+System-drive free space (and the page file it hosts) changes slowly, so it is
+read once a minute. Those readings ride along in every sample for the rules
+but are not stored.
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 import warnings
 
@@ -43,6 +48,14 @@ SAMPLE_COLUMNS = [
     "gpu_clock_mhz", "gpu_throttle",
     "handles", "processes", "threads",
 ]
+
+SYSTEM_DRIVE = os.environ.get("SystemDrive", "C:") + "\\"
+DRIVE_INTERVAL_SEC = 60
+
+# Refreshed every DRIVE_INTERVAL_SEC; present in each sample, not in SAMPLE_COLUMNS.
+_DRIVE_UNKNOWN = {
+    "sysdrive_free_gb": NAN, "sysdrive_total_gb": NAN, "pagefile_gb": NAN, "commit_limit_gb": NAN,
+}
 
 # NVML clock-event ("throttle") reason bits that mean heat, not workload.
 THROTTLE_HW_SLOWDOWN = 0x08
@@ -187,6 +200,8 @@ def _rate(cur: int, prev: int, dt: float) -> float:
 class SystemSampler:
     def __init__(self, gpu: GpuSampler | None = None):
         self.gpu = gpu
+        self._drive = dict(_DRIVE_UNKNOWN)
+        self._next_drive = 0.0
         self.reset_rates()
 
     def reset_rates(self) -> None:
@@ -226,6 +241,9 @@ class SystemSampler:
 
         perf = winapi.performance_info()
         idle = winapi.user_idle_seconds()
+        if now >= self._next_drive:
+            self._next_drive = now + DRIVE_INTERVAL_SEC
+            self._drive = self._drive_space(perf)
 
         s = {
             "ts": time.time() if ts is None else ts,
@@ -245,5 +263,20 @@ class SystemSampler:
             "processes": perf.processes if perf else NAN,
             "threads": perf.threads if perf else NAN,
         }
+        s.update(self._drive)
         s.update(self.gpu.sample() if self.gpu else _GPU_ABSENT)
         return s
+
+    @staticmethod
+    def _drive_space(perf: winapi.PerformanceInfo | None) -> dict:
+        try:
+            du = psutil.disk_usage(SYSTEM_DRIVE)
+            free, total = du.free / 2**30, du.total / 2**30
+        except OSError:
+            free = total = NAN
+        return {
+            "sysdrive_free_gb": free,
+            "sysdrive_total_gb": total,
+            "pagefile_gb": perf.pagefile_bytes / 2**30 if perf else NAN,
+            "commit_limit_gb": perf.commit_limit_bytes / 2**30 if perf else NAN,
+        }

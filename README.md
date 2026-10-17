@@ -38,12 +38,15 @@ Optional settings go in `config.toml` (copy `config.example.toml`).
 | `memory_pressure` | RAM or commit charge ≥ 90 % for a minute; lists the largest processes. |
 | `gpu_thermal` | GPU ≥ 87 °C, or reporting thermal throttling while ≥ 75 °C, for 30 s; lists GPU clients. (This laptop's driver raises its "thermal" flag at 32–52 °C while idle, so the flag alone is ignored.) |
 | `gpu_awake_on_battery` | dGPU powered up but idle on battery for 10 min (it drains ~10–15 W); names what keeps it awake. |
+| `low_disk_space` | The system drive (C:) has < 20 GB or < 10 % free (checked once a minute). Includes the page-file size and commit limit: an auto-managed page file can only grow into free space, so with less free space than RAM the commit limit stays near RAM size and heavy loads can run out of commit. |
 | `background_cpu` | A process that is *not* the foreground app uses ≥ 0.8 cores for 5 min. |
 | `memory_leak` | A process's private memory grows steadily (≥ 500 MB, R² ≥ 0.8, monotone) over ≥ 1 h. |
 | `handle_leak` | A process holds > 100 000 handles, or holds > 10 000 and keeps growing steadily. |
 
 A leaking executable is reported once. After that it's mentioned again only when it is twice as bad,
 or a month later, even if the process is restarted, so a known, managed leak doesn't nag.
+A full drive works the same way: it's mentioned again once free space has halved, or after a week.
+If the drive recovers to twice the free space it had at the last warning, the next shortage is reported straight away.
 
 Rules work from the first second. The ML needs one hour of data before it starts.
 It then improves as history accumulates; the first day is the noisiest.
@@ -52,7 +55,7 @@ It then improves as history accumulates; the first day is the noisiest.
 
 ```
 1 Hz system sample ──┬── samples table (48 h)
-                     ├── rules: memory pressure, GPU thermal, dGPU on battery
+                     ├── rules: memory pressure, GPU thermal, dGPU on battery, low disk space
 5 s process sweep ───┼── rules: background CPU hog, memory/handle leaks
                      │   (+ who-was-busy history for explanations)
 10 s window ─────────┴── score vs. history ── anomaly episodes ── events (SQLite + events.jsonl)

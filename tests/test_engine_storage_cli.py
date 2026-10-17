@@ -217,3 +217,14 @@ def test_leak_alerts_are_not_repeated_after_a_monitor_restart(cfg):
         m.storage.close()
     events = query_events(cfg.data_path / "metrics.db", 0, ["handle_leak"])
     assert len(events) == 1 and "900,000 handles" in events[0]["title"]
+
+
+def test_low_disk_warning_is_not_repeated_after_a_monitor_restart(cfg):
+    for run in range(2):
+        sampler = SimSampler()
+        sampler.overrides = {"sysdrive_free_gb": 15.0, "sysdrive_total_gb": 953.0}
+        m = Monitor(cfg, sampler=sampler, procs=SimProcs(), gpu=None)
+        simulate(m, sampler, m.procs, time.time() + run * 100, 5)
+        m.storage.close()
+    [ev] = query_events(cfg.data_path / "metrics.db", 0, ["low_disk_space"])
+    assert "15.0 GB free of 953 GB" in ev["title"]

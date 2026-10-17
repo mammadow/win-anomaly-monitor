@@ -196,6 +196,7 @@ class ProcessSnapshotter:
 class PerformanceInfo:
     commit_bytes: int
     commit_limit_bytes: int
+    physical_bytes: int
     handles: int
     processes: int
     threads: int
@@ -203,6 +204,11 @@ class PerformanceInfo:
     @property
     def commit_percent(self) -> float:
         return 100.0 * self.commit_bytes / self.commit_limit_bytes if self.commit_limit_bytes else 0.0
+
+    @property
+    def pagefile_bytes(self) -> int:
+        """Page-file share of the commit limit (limit − RAM; how psutil sizes swap on Windows)."""
+        return max(0, self.commit_limit_bytes - self.physical_bytes)
 
 
 def performance_info() -> PerformanceInfo | None:
@@ -216,6 +222,7 @@ def performance_info() -> PerformanceInfo | None:
     return PerformanceInfo(
         commit_bytes=pi.CommitTotal * pi.PageSize,
         commit_limit_bytes=pi.CommitLimit * pi.PageSize,
+        physical_bytes=pi.PhysicalTotal * pi.PageSize,
         handles=pi.HandleCount,
         processes=pi.ProcessCount,
         threads=pi.ThreadCount,

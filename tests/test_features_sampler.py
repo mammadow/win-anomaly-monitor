@@ -100,6 +100,17 @@ def test_real_system_sample_has_every_column():
     assert set(SAMPLE_COLUMNS) <= set(s)
     assert 0 <= s["cpu_pct"] <= 100 and s["core_max_pct"] >= s["cpu_pct"] - 1e-9
     assert s["ts"] == 123.0
+    assert 0 < s["sysdrive_free_gb"] <= s["sysdrive_total_gb"]
+
+
+def test_system_drive_space_is_read_once_a_minute(monkeypatch):
+    calls = []
+    real = sampler_mod.psutil.disk_usage
+    monkeypatch.setattr(sampler_mod.psutil, "disk_usage", lambda p: calls.append(p) or real(p))
+    sm = SystemSampler(gpu=None)
+    first, second = sm.sample(1.0), sm.sample(2.0)
+    assert calls == [sampler_mod.SYSTEM_DRIVE]
+    assert second["sysdrive_free_gb"] == first["sysdrive_free_gb"]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows API")
@@ -121,5 +132,6 @@ def test_native_process_snapshot_matches_psutil():
 def test_performance_info_is_sane():
     pi = winapi.performance_info()
     assert pi.processes > 10 and pi.handles > 1000 and 0 < pi.commit_percent < 100
+    assert 0 < pi.physical_bytes <= pi.commit_limit_bytes and pi.pagefile_bytes < pi.commit_limit_bytes
     idle = winapi.user_idle_seconds()
     assert idle is None or idle >= 0

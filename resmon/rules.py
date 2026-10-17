@@ -7,6 +7,7 @@ EventManager.
   MemoryPressure       RAM or commit charge near exhaustion
   GpuThermal           GPU thermal throttling / overheating
   GpuAwakeOnBattery    dGPU kept powered while idle on battery (drains it)
+  LowDiskSpace         system drive nearly full (also stops the page file growing)
   BackgroundCpu        a non-foreground process burning CPU for minutes
   Leaks                per-process private-memory and handle growth trends
 
@@ -25,7 +26,8 @@ import numpy as np
 
 from .events import Event, fmt_duration
 from .features import FEATURE_BY_COLUMN, ML_FEATURES, fmt_bytes, fmt_feature, to_matrix
-from .sampler import THERMAL_THROTTLE_MASK, THROTTLE_HW_SLOWDOWN, THROTTLE_HW_THERMAL, THROTTLE_SW_THERMAL
+from .sampler import (SYSTEM_DRIVE, THERMAL_THROTTLE_MASK, THROTTLE_HW_SLOWDOWN, THROTTLE_HW_THERMAL,
+                      THROTTLE_SW_THERMAL)
 
 if TYPE_CHECKING:
     from .engine import Monitor
@@ -371,6 +373,57 @@ class GpuAwakeOnBattery(Detector):
         elif tr == "end" and self.event is not None:
             self.mon.events.close(self.event, now)
             self.event, self._power = None, []
+
+
+class LowDiskSpace(Detector):
+    """
+    The system drive nearly full. An auto-managed page file can only grow into free
+    space on its drive, so this also keeps the commit limit near RAM size (commit hit
+    99 % here during a game, with a 2.3 GB page file and 15 GB free on C:).
+    """
+    kind = "low_disk_space"
+    REMIND_SEC = 7 * 86400    # a drive that stays full is mentioned again after a week…
+    REMIND_FACTOR = 2.0       # …or as soon as free space has halved since the last warning
+
+    def __init__(self, mon):
+        super().__init__(mon)
+        # (free GB when last reported, when). Restored from recent events, so a restarted
+        # monitor doesn't re-announce a drive it has already warned about.
+        self.reported: tuple[float, float] | None = None
+        for ev in mon.events.recent([self.kind], days=self.REMIND_SEC / 86400):
+            free = ev["details"].get("free_gb")
+            if free is not None and (self.reported is None or ev["ts"] > self.reported[1]):
+                self.reported = (free, ev["ts"])
+
+    def on_sample(self, s, now):
+        free, total = s.get("sysdrive_free_gb"), s.get("sysdrive_total_gb")
+        if _isnan(free) or _isnan(total) or total <= 0:
+            return
+        pct = 100.0 * free / total
+        last = self.reported
+        if free >= self.cfg.low_disk_free_gb and pct >= self.cfg.low_disk_free_percent:
+            if last is not None and free >= self.REMIND_FACTOR * last[0]:
+                self.reported = None          # clearly recovered: running low again is news
+            return
+        if last is None or now - last[1] >= self.REMIND_SEC or free < last[0] / self.REMIND_FACTOR:
+            self._report(s, free, total, pct, now)
+
+    def _report(self, s, free, total, pct, now):
+        self.reported = (free, now)
+        drive = SYSTEM_DRIVE.rstrip("\\")
+        pagefile, limit, commit = s.get("pagefile_gb"), s.get("commit_limit_gb"), s.get("commit_pct")
+        title = f"System drive {drive} nearly full: {free:.1f} GB free of {total:,.0f} GB ({pct:.1f}%)"
+        if not _isnan(limit) and not _isnan(pagefile) and free < limit - pagefile:
+            title += f" — page file can't grow much, commit limit stays ~{limit:.0f} GB"   # free < RAM
+        self.mon.events.point(self.kind, "warning", title, now, {
+            "drive": drive, "free_gb": round(free, 1), "total_gb": round(total, 1), "free_pct": round(pct, 1),
+            "pagefile_gb": None if _isnan(pagefile) else round(pagefile, 1),
+            "commit_limit_gb": None if _isnan(limit) else round(limit, 1),
+            "commit_pct": None if _isnan(commit) else round(commit, 1),
+            "note": "An auto-managed page file can only grow into free space on its drive. When that is "
+                    "less than RAM, the commit limit (RAM + page file) stays near RAM size and a heavy "
+                    "load can run out of commit (apps crash, Windows warns of low memory) before RAM "
+                    "is full. Free up space, or set a fixed page-file size."})
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -5,7 +5,7 @@ import pytest
 from conftest import make_sample
 from resmon.processes import ProcStat
 from resmon.rules import (AnomalyEpisodes, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, Leaks,
-                          MemoryPressure, Sustained)
+                          LowDiskSpace, MemoryPressure, Sustained)
 from resmon.sampler import THROTTLE_HW_THERMAL
 
 
@@ -95,6 +95,70 @@ def test_dgpu_awake_on_ac_is_fine(mon):
     for t in range(0, 15 * 60):
         r.on_sample(make_sample(t, on_ac=1.0, gpu_awake=1.0, gpu_power_w=14.0), t)
     assert not mon.events.events
+
+
+def drive(free_gb, total_gb=953.0):
+    """This laptop on 2026-10-17: 2.3 GB auto-managed page file, commit limit 34 GB on 31.7 GB RAM."""
+    return dict(sysdrive_free_gb=free_gb, sysdrive_total_gb=total_gb, pagefile_gb=2.3, commit_limit_gb=34.0)
+
+
+def test_nearly_full_system_drive_names_the_commit_risk(mon):
+    r = LowDiskSpace(mon)
+    r.on_sample(make_sample(0, commit_pct=99.2, **drive(15.0)), 0.0)
+    [ev] = mon.events.of_kind("low_disk_space")
+    assert ev.severity == "warning" and not ev.is_open
+    assert "15.0 GB free of 953 GB (1.6%)" in ev.title
+    assert "page file can't grow much" in ev.title and "~34 GB" in ev.title
+    d = ev.details
+    assert (d["free_gb"], d["total_gb"], d["pagefile_gb"], d["commit_limit_gb"], d["commit_pct"]) == \
+        (15.0, 953.0, 2.3, 34.0, 99.2)
+
+
+def test_low_disk_thresholds(mon):
+    r = LowDiskSpace(mon)
+    r.on_sample(make_sample(0, **drive(300.0)), 0.0)             # 31 % free: fine
+    r.on_sample(make_sample(1, **drive(25.0, total_gb=100.0)), 1.0)   # small drive, > 20 GB: fine
+    r.on_sample(make_sample(2, **drive(math.nan)), 2.0)           # unknown: no verdict
+    r.on_sample(make_sample(3), 3.0)                              # no drive reading at all
+    assert not mon.events.events
+    r.on_sample(make_sample(4, **drive(90.0)), 4.0)               # 9.4 % free: below 10 %
+    [ev] = mon.events.of_kind("low_disk_space")
+    assert "90.0 GB free" in ev.title and "page file" not in ev.title    # more free than RAM
+
+
+def test_low_disk_thresholds_are_configurable(mon):
+    mon.cfg.low_disk_free_gb, mon.cfg.low_disk_free_percent = 10, 0
+    r = LowDiskSpace(mon)
+    r.on_sample(make_sample(0, **drive(15.0)), 0.0)
+    assert not mon.events.events
+    r.on_sample(make_sample(1, **drive(9.0)), 1.0)
+    assert len(mon.events.of_kind("low_disk_space")) == 1
+
+
+def test_low_disk_space_is_repeated_only_when_twice_as_bad(mon):
+    r = LowDiskSpace(mon)
+    t = 0.0
+    for free in [15.0] * 60 + [10.0] * 60 + [7.6] * 60:          # an hour at each level
+        r.on_sample(make_sample(t, **drive(free)), t)
+        t += 60
+    assert len(mon.events.of_kind("low_disk_space")) == 1
+    r.on_sample(make_sample(t, **drive(7.4)), t)                  # free space halved: speak up
+    assert len(mon.events.of_kind("low_disk_space")) == 2
+    r.on_sample(make_sample(t + 86_400, **drive(7.4)), t + 86_400)
+    assert len(mon.events.of_kind("low_disk_space")) == 2
+    r.on_sample(make_sample(t + 7 * 86_400, **drive(7.4)), t + 7 * 86_400)
+    assert len(mon.events.of_kind("low_disk_space")) == 3         # weekly reminder
+
+
+def test_drive_that_recovered_warns_afresh(mon):
+    r = LowDiskSpace(mon)
+    r.on_sample(make_sample(0, **drive(15.0)), 0.0)
+    r.on_sample(make_sample(60, **drive(25.0, total_gb=100.0)), 60.0)    # not low, not twice as free
+    r.on_sample(make_sample(120, **drive(19.0)), 120.0)
+    assert len(mon.events.of_kind("low_disk_space")) == 1
+    r.on_sample(make_sample(180, **drive(120.0)), 180.0)                 # cleaned up
+    r.on_sample(make_sample(240, **drive(19.0)), 240.0)                  # filled up again: news
+    assert len(mon.events.of_kind("low_disk_space")) == 2
 
 
 # ── Per-process rules ─────────────────────────────────────────────────
