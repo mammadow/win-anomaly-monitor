@@ -67,6 +67,11 @@ class Storage:
         window_cols = ", ".join(f"{k} REAL" for k in WINDOW_COLUMNS[1:])
         with c:
             c.execute(f"CREATE TABLE IF NOT EXISTS samples (ts REAL PRIMARY KEY, {sample_cols}) WITHOUT ROWID")
+            # Columns added since the table was created (e.g. DPC/ISR time) — additive, no reset needed.
+            have = {row[1] for row in c.execute("PRAGMA table_info(samples)")}
+            for col in SAMPLE_COLUMNS[1:]:
+                if col not in have:
+                    c.execute(f"ALTER TABLE samples ADD COLUMN {col} REAL")
             c.execute(f"""CREATE TABLE IF NOT EXISTS windows (
                 ts REAL PRIMARY KEY, {window_cols},
                 score REAL, anomalous INTEGER, top_procs TEXT, fg_name TEXT) WITHOUT ROWID""")
@@ -94,7 +99,8 @@ class Storage:
         with self.conn:
             if self._samples:
                 ph = ", ".join("?" * len(SAMPLE_COLUMNS))
-                self.conn.executemany(f"INSERT OR REPLACE INTO samples VALUES ({ph})", self._samples)
+                self.conn.executemany(f"INSERT OR REPLACE INTO samples ({', '.join(SAMPLE_COLUMNS)}) "
+                                      f"VALUES ({ph})", self._samples)
             if self._windows:
                 ph = ", ".join("?" * (len(WINDOW_COLUMNS) + len(WINDOW_EXTRA)))
                 self.conn.executemany(f"INSERT OR REPLACE INTO windows VALUES ({ph})", self._windows)

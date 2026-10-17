@@ -8,6 +8,7 @@ EventManager.
   GpuThermal           GPU thermal throttling / overheating
   GpuAwakeOnBattery    dGPU kept powered while idle on battery (drains it)
   LowDiskSpace         system drive nearly full (also stops the page file growing)
+  UiFreeze             the foreground app or the whole desktop stopped responding
   BackgroundCpu        a non-foreground process burning CPU for minutes
   Leaks                per-process private-memory and handle growth trends
 
@@ -424,6 +425,169 @@ class LowDiskSpace(Detector):
                     "less than RAM, the commit limit (RAM + page file) stays near RAM size and a heavy "
                     "load can run out of commit (apps crash, Windows warns of low memory) before RAM "
                     "is full. Free up space, or set a fixed page-file size."})
+
+
+# ════════════════════════════════════════════════════════════════════
+#  UI freezes (responsiveness probe)
+# ════════════════════════════════════════════════════════════════════
+
+def _fmt_sec(sec: float) -> str:
+    return f"{sec:.1f} s" if sec < 60 else fmt_duration(sec)
+
+
+class UiFreeze(Detector):
+    """
+    The app in front of you, or the whole desktop, stopped responding. The
+    probe (responsiveness.py) times each freeze on its own threads; this
+    explains it with what the samples and process sweeps saw around it.
+    """
+    kind = "ui_freeze"
+    CONTEXT_SEC = 3.0         # look this far either side of the freeze
+    SETTLE_SEC = 6.0          # report once samples (and a process sweep) cover the freeze + context
+    BASELINE_SEC = 60.0       # a core's usual DPC/ISR level = median over the minute before
+    DPC_SPIKE_PCT = 25.0      # one core spending this share in DPC/ISR (≈2 % at idle here)…
+    DPC_SPIKE_FACTOR = 3.0    # …and 3× its level in the minute before
+    DISK_BUSY_BPS = 100e6
+    LOOP_GAP_SEC = 2.5        # the monitor's own 1 Hz loop skipping this long
+    USER_AWAY_SEC = 60.0
+
+    def __init__(self, mon):
+        super().__init__(mon)
+        self.samples: deque[dict] = deque()
+        self.pending: list = []
+
+    # No reset(): after a gap (sleep) freezes already timed by the probe stay valid,
+    # and the probe discards anything that overlapped the sleep itself.
+
+    def on_sample(self, s, now):
+        self.samples.append(s)
+        while self.samples and self.samples[0]["ts"] < now - 300:
+            self.samples.popleft()
+        probe = getattr(self.mon, "ui_probe", None)
+        if probe is not None:
+            self.pending.extend(probe.drain(now))
+        if not self.pending:
+            return
+        ready = [f for f in self.pending if now >= f.end + self.SETTLE_SEC]
+        if ready:
+            self.pending = [f for f in self.pending if now < f.end + self.SETTLE_SEC]
+            for f in ready:
+                self._report(f)
+
+    def _report(self, f) -> None:
+        dur = f.duration
+        lo, hi = f.start - self.CONTEXT_SEC, f.end + self.CONTEXT_SEC
+        # A sample's rates cover the second before it, so the one just after `hi` still counts.
+        window = [s for s in self.samples if lo <= s["ts"] <= hi + self.cfg.sample_interval_sec]
+        before = [s for s in self.samples if s["ts"] < lo]
+        seq = before[-1:] + window
+
+        def peak(col):
+            vals = [s.get(col) for s in window]
+            vals = [v for v in vals if not _isnan(v)]
+            return max(vals) if vals else math.nan
+
+        def when(t):
+            off = t - f.start
+            if off < 0:
+                return f"{-off:.1f} s before it began"
+            return f"{off:.1f} s into it" if off <= dur else f"{off - dur:.1f} s after it ended"
+
+        clues: list[str] = []
+        transitions = []
+        for a, b in zip(seq, seq[1:]):
+            x, y = a.get("gpu_awake"), b.get("gpu_awake")
+            if _isnan(x) or _isnan(y) or x == y:
+                continue
+            to = "woke up" if y else "powered off"
+            transitions.append({"at_sec": round(b["ts"] - f.start, 1), "dgpu": to})
+            clues.append(f"dGPU {to} {when(b['ts'])} (±1 s)")
+
+        dpc_core = peak("dpc_isr_core_max_pct")
+        base = [s["dpc_isr_core_max_pct"] for s in self.samples
+                if lo - self.BASELINE_SEC <= s["ts"] < lo and not _isnan(s.get("dpc_isr_core_max_pct"))]
+        dpc_base = float(np.median(base)) if base else math.nan
+        dpc_spike = not _isnan(dpc_core) and dpc_core >= self.DPC_SPIKE_PCT \
+            and (_isnan(dpc_base) or dpc_core >= self.DPC_SPIKE_FACTOR * dpc_base)
+        if dpc_spike:
+            clues.append(f"DPC/interrupt storm: one core spent {dpc_core:.0f}% in driver DPC/ISR work "
+                         f"(usually {dpc_base:.0f}%)")
+
+        cpu = peak("cpu_pct")
+        saturated = not _isnan(cpu) and cpu >= 90
+        if saturated:
+            clues.append(f"CPU saturated ({cpu:.0f}%)")
+        commit, ram = peak("commit_pct"), peak("ram_pct")
+        if (not _isnan(commit) and commit >= self.cfg.commit_pressure_percent) \
+                or (not _isnan(ram) and ram >= self.cfg.ram_pressure_percent):
+            clues.append(f"memory nearly exhausted (RAM {ram:.0f}%, commit {commit:.0f}%)")
+        disk = max((v for v in (peak("disk_read_bps"), peak("disk_write_bps")) if not _isnan(v)), default=math.nan)
+        if not _isnan(disk) and disk >= self.DISK_BUSY_BPS:
+            clues.append(f"heavy disk I/O ({fmt_bytes(disk, True)})")
+        gpu = peak("gpu_util_pct")
+        if not _isnan(gpu) and gpu >= 95:
+            clues.append(f"GPU fully loaded ({gpu:.0f}%)")
+        # A symptom more than a cause (the 1 Hz loop runs at low priority), so it comes after them.
+        gap = max((b["ts"] - a["ts"] for a, b in zip(seq, seq[1:])), default=0.0)
+        if gap >= self.LOOP_GAP_SEC:
+            clues.append(f"the monitor's own low-priority sampling stalled too ({gap:.1f} s gap): "
+                         f"the CPU was saturated or the whole system stalled")
+
+        app_cpu, span = self.mon.procs.cpu_seconds(f.pid, f.start, f.end) if f.scope != "display" else (0.0, 0.0)
+        if span > 0 and dur >= 1.0:
+            if app_cpu >= 0.8 * dur:
+                clues.append(f"{f.exe} was busy computing ({app_cpu:.1f} CPU-s in the {span:.0f} s around it)")
+            elif app_cpu < 0.2 * dur:
+                clues.append(f"{f.exe} was nearly idle ({app_cpu:.2f} CPU-s): " + (
+                    "starved of CPU by everything else" if saturated else
+                    "waiting on something (GPU/driver, disk, a lock), not computing"))
+
+        idles = [s["user_idle_sec"] for s in window if not _isnan(s.get("user_idle_sec"))]
+        away = bool(idles) and min(idles) >= self.USER_AWAY_SEC
+
+        if f.scope == "display":
+            title = f"Screen froze for {_fmt_sec(dur)} (desktop compositor stalled) while using {f.exe}"
+        elif f.scope == "desktop":
+            also = " and ".join(n for n, v in (("the taskbar", f.taskbar_slow_sec),
+                                               ("the compositor", f.compositor_slow_sec)) if v >= 0.5)
+            title = f"Desktop froze for {_fmt_sec(dur)}: {f.exe} and {also} stopped responding"
+        else:
+            title = f"{f.exe} stopped responding for {_fmt_sec(dur)}"
+            if f.hung:
+                title += " (Windows marked it Not Responding)"
+        if clues:
+            title += f" — {clues[0]}"
+        severity = "warning" if (f.scope != "app" or f.hung or dur >= 5) and not away else "info"
+
+        self.mon.events.point(self.kind, severity, title, f.start, {
+            "process": f.exe, "pid": f.pid, "window_class": f.window_class, "scope": f.scope,
+            "duration_sec": round(dur, 2), "longest_stall_sec": round(f.longest_sec, 2), "stalls": f.stalls,
+            "hung": f.hung, "ended": f.ended, "switched_away": f.switched_away,
+            "taskbar_slow_sec": f.taskbar_slow_sec, "compositor_slow_sec": f.compositor_slow_sec,
+            "clues": clues,
+            "dgpu_transitions": transitions,
+            "dpc_isr_spike": dpc_spike,
+            "app_cpu_sec": round(app_cpu, 2) if span > 0 else None,
+            "around": {
+                "cpu_max_pct": _round(cpu), "busiest_core_pct": _round(peak("core_max_pct")),
+                "disk_read_max": fmt_bytes(peak("disk_read_bps"), True),
+                "disk_write_max": fmt_bytes(peak("disk_write_bps"), True),
+                "ram_max_pct": _round(ram), "commit_max_pct": _round(commit),
+                "dgpu_awake": sorted({int(s["gpu_awake"]) for s in window if not _isnan(s.get("gpu_awake"))}),
+                "gpu_util_max_pct": _round(gpu),
+                "dpc_isr_core_max_pct": _round(dpc_core), "dpc_isr_core_usual_pct": _round(dpc_base),
+                "dpc_max_pct": _round(peak("dpc_pct"), 2), "isr_max_pct": _round(peak("isr_pct"), 2),
+                "monitor_loop_gap_sec": round(gap, 1), "samples": len(window),
+            },
+            "top_cpu": self.mon.procs.top_activity(since=f.start - 5)["cpu"][:5],
+            "gpu_clients": self.mon.gpu_clients(),
+            "foreground": f.exe,
+            "user_idle": away,
+        }, ts_end=f.end)
+
+
+def _round(v: float, nd: int = 0):
+    return None if _isnan(v) else round(v, nd) if nd else round(v)
 
 
 # ════════════════════════════════════════════════════════════════════

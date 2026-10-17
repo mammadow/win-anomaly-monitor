@@ -141,12 +141,14 @@ class EventManager:
                                   title=ev.title, details=ev.details)
         logging.info("▶ [%s #%d] recurred (×%d): %s", ev.kind, ev.id, ev.details["recurrences"], ev.title)
 
-    def point(self, kind: str, severity: str, title: str, ts: float, details: dict) -> Event:
-        """An instantaneous finding (e.g. a leak verdict): opened and closed at once."""
-        ev = Event(kind, severity, title, ts, ts, details)
+    def point(self, kind: str, severity: str, title: str, ts: float, details: dict,
+              ts_end: float | None = None) -> Event:
+        """A finding recorded after the fact (a leak verdict, a freeze that already ended): opened and closed at once."""
+        end = ts if ts_end is None else max(ts, ts_end)
+        ev = Event(kind, severity, title, ts, end, details)
         ev.id = self.storage.insert_event(kind, severity, ts, title, details)
         ev.is_open = False
-        self.storage.update_event(ev.id, severity=severity, ts_end=ts, is_open=False,
+        self.storage.update_event(ev.id, severity=severity, ts_end=end, is_open=False,
                                   title=title, details=details)
         self._append_jsonl(ev)
         self._log(ev, "")

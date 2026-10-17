@@ -3,8 +3,12 @@ The orchestrator: one `tick()` per second.
 
   sample ─┬─ store (1 Hz)
           ├─ rules (memory pressure, GPU thermal, dGPU-on-battery, low disk space)
+          ├─ UI freezes timed by the responsiveness probe → explained from the samples
           ├─ every 5 s: process sweep → rules (background CPU, leaks)
           └─ every 10 s: window → ML score → anomaly episodes → store
+
+  The responsiveness probe runs in a helper process (not throttled by the
+  Efficiency Mode the main loop runs in) and hands finished freezes over.
 
 Lifecycle
   * Starts collecting immediately. Rules work from the first second.
@@ -36,8 +40,9 @@ from .detector import AnomalyModel, Trainer
 from .events import EventManager, Notifier, fmt_duration
 from .features import WindowAggregator, to_matrix
 from .processes import ProcessTracker
+from .responsiveness import ProbeProcess
 from .rules import (AnomalyEpisodes, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, Leaks,
-                    LowDiskSpace, MemoryPressure)
+                    LowDiskSpace, MemoryPressure, UiFreeze)
 from .sampler import GpuSampler, SystemSampler
 from .storage import Storage, load_training_windows
 
@@ -112,6 +117,7 @@ class Monitor:
         self.aggregator = WindowAggregator(cfg.window_sec, cfg.sample_interval_sec)
         self.trainer = Trainer(self.data)
         self.model: AnomalyModel | None = None
+        self.ui_probe: ProbeProcess | None = None   # helper process, started by run()
 
         self.episodes = AnomalyEpisodes(self)
         self.detectors = [
@@ -120,6 +126,7 @@ class Monitor:
             GpuThermal(self),
             GpuAwakeOnBattery(self),
             LowDiskSpace(self),
+            UiFreeze(self),
             BackgroundCpu(self),
             Leaks(self),
         ]
@@ -309,6 +316,7 @@ class Monitor:
                             for e in self.events.open_events.values()],
             "ml_quiet_until": datetime.fromtimestamp(self.grace_until).isoformat(timespec="seconds")
             if now < self.grace_until else None,
+            "ui_probe": self.ui_probe.snapshot() if self.ui_probe else None,
             "self_cpu_seconds": round(sum(psutil.Process().cpu_times()[:2]), 1),
             "self_memory_mb": round(psutil.Process().memory_info().rss / 2**20),
         }
@@ -347,12 +355,17 @@ class Monitor:
         else:
             eco = False
 
+        if cfg.ui_freeze_probe and winapi.IS_WINDOWS:
+            self.ui_probe = ProbeProcess(cfg.ui_freeze_sec, cfg.ui_probe_interval_sec)
+            self.ui_probe.start()
+
         orphans = self.storage.close_orphaned_events()
         logging.info("═" * 64)
         logging.info("  Resource Monitor v%s", __version__)
         logging.info("  sampling %gs · windows %ds · process sweep %gs · ML alert quantile %g",
                      cfg.sample_interval_sec, cfg.window_sec, cfg.process_interval_sec, cfg.alert_quantile)
-        logging.info("  data: %s%s%s", self.data, " · efficiency mode" if eco else "",
+        logging.info("  data: %s%s%s%s", self.data, " · efficiency mode" if eco else "",
+                     f" · UI freeze probe every {cfg.ui_probe_interval_sec:g}s" if self.ui_probe else "",
                      f" · closed {orphans} event(s) left open by last run" if orphans else "")
         logging.info("═" * 64)
 
@@ -389,6 +402,8 @@ class Monitor:
     def shutdown(self) -> None:
         now = time.time()
         logging.info("Shutting down…")
+        if self.ui_probe is not None:
+            self.ui_probe.stop()
         try:
             self.episodes.shutdown(now)
             self.events.close_all(now, "monitor stopped")

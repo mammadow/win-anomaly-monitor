@@ -74,6 +74,10 @@ class MonitorConfig:
 
     gpu_awake_idle_minutes: float = 10      # on battery: dGPU awake but idle → battery drain
 
+    ui_freeze_probe: bool = True            # time how fast the foreground app answers window messages
+    ui_freeze_sec: float = 1.0              # an app (or the desktop) not answering for this long has frozen
+    ui_probe_interval_sec: float = 0.5      # how often it is asked (each probe costs microseconds)
+
     ignore_processes: list[str] = field(default_factory=list)  # names (case-insensitive) never blamed
 
     # ── Notifications ─────────────────────────────────────────────────
@@ -102,6 +106,8 @@ class MonitorConfig:
             raise ValueError("window counts must be ≥ 1")
         if self.low_disk_free_gb < 0 or not 0 <= self.low_disk_free_percent < 100:
             raise ValueError("low_disk_free_gb must be ≥ 0 and low_disk_free_percent in [0, 100)")
+        if not 0.25 <= self.ui_freeze_sec <= 60 or not 0.1 <= self.ui_probe_interval_sec <= 5:
+            raise ValueError("ui_freeze_sec must be in [0.25, 60] and ui_probe_interval_sec in [0.1, 5]")
         if self.notify_min_severity not in SEVERITIES:
             raise ValueError(f"notify_min_severity must be one of {SEVERITIES}")
         self.ignore_processes = [n.lower() for n in self.ignore_processes]

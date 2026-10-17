@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import math
+import sys
 import threading
 import time
 
@@ -159,6 +160,8 @@ def test_run_loop_survives_errors_and_stops_cleanly(tmp_path):
     m.run()
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state["stopped"] and state["samples_this_run"] > 10
+    if sys.platform == "win32":                        # the probe helper ran and was stopped with it
+        assert state["ui_probe"]["pid"] and not state["ui_probe"]["running"]
 
 
 def test_background_training_produces_and_saves_a_model(cfg):
@@ -202,6 +205,17 @@ def test_cli_status_report_reset(sim, cfg, capsys):
 
     assert main(["--data-dir", d, "report", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["kind"] == "handle_leak"
+
+    m.storage = Storage(cfg.data_path / "metrics.db")
+    m.events.storage = m.storage
+    t = time.time()
+    m.events.point("ui_freeze", "warning", "brave.exe stopped responding for 2.4 s — dGPU powered off 0.8 s into it",
+                   t, {"clues": ["dGPU powered off 0.8 s into it", "heavy disk I/O (150.0 MB/s)"],
+                       "ended": "responded", "foreground": "brave.exe"}, ts_end=t + 2.4)
+    m.storage.close()
+    assert main(["--data-dir", d, "report", "-k", "ui_freeze"]) == 0
+    out = capsys.readouterr().out
+    assert "ui_freeze  lasted 2s" in out and "also  : heavy disk I/O" in out and "ended" not in out
 
     assert main(["--data-dir", d, "reset", "--yes"]) == 0
     assert not (cfg.data_path / "metrics.db").exists()

@@ -183,6 +183,16 @@ class ProcessTracker:
             }),
         }
 
+    def cpu_seconds(self, pid: int, start: float, end: float) -> tuple[float, float]:
+        """(CPU-seconds used by `pid`, seconds of sweeps) over the sweeps overlapping [start, end]."""
+        cpu = span = 0.0
+        for t, dt, active in self.history:
+            if t < start or t - dt > end:
+                continue
+            span += dt
+            cpu += sum(cores * dt for key, _, cores, _ in active if key[0] == pid)
+        return cpu, span
+
     def top_memory(self, n: int = 5) -> list[dict]:
         """Largest private-memory users right now, grouped by executable name."""
         total: dict[str, int] = defaultdict(int)

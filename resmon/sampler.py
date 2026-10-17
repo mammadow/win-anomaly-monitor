@@ -11,6 +11,10 @@ Fixes over v2:
     temperature unknown, instead of feeding 0↔47 °C jumps to the model.
   * Physically impossible GPU readings (a 590 W spike was recorded) are dropped.
 
+DPC and interrupt time (driver work that preempts every thread) is recorded
+system-wide and for the busiest core: a storm on one core can freeze the UI
+while total CPU looks idle.
+
 System-drive free space (and the page file it hosts) changes slowly, so it is
 read once a minute. Those readings ride along in every sample for the rules
 but are not stored.
@@ -47,6 +51,7 @@ SAMPLE_COLUMNS = [
     "gpu_awake", "gpu_util_pct", "gpu_vram_pct", "gpu_temp_c", "gpu_power_w",
     "gpu_clock_mhz", "gpu_throttle",
     "handles", "processes", "threads",
+    "dpc_pct", "isr_pct", "dpc_isr_core_max_pct",
 ]
 
 SYSTEM_DRIVE = os.environ.get("SystemDrive", "C:") + "\\"
@@ -62,6 +67,8 @@ THROTTLE_HW_SLOWDOWN = 0x08
 THROTTLE_SW_THERMAL = 0x20
 THROTTLE_HW_THERMAL = 0x40
 THERMAL_THROTTLE_MASK = THROTTLE_HW_SLOWDOWN | THROTTLE_SW_THERMAL | THROTTLE_HW_THERMAL
+
+_DPC_UNKNOWN = {"dpc_pct": NAN, "isr_pct": NAN, "dpc_isr_core_max_pct": NAN}
 
 _GPU_ABSENT = {
     "gpu_awake": NAN, "gpu_util_pct": NAN, "gpu_vram_pct": NAN, "gpu_temp_c": NAN,
@@ -207,6 +214,7 @@ class SystemSampler:
     def reset_rates(self) -> None:
         """Re-baseline rate counters (start-up, or after the machine slept)."""
         psutil.cpu_percent(percpu=True)
+        self._prev_cpu_times = winapi.processor_times()
         self._prev_disk = psutil.disk_io_counters()
         self._prev_net = psutil.net_io_counters()
         self._prev_t = time.monotonic()
@@ -264,8 +272,30 @@ class SystemSampler:
             "threads": perf.threads if perf else NAN,
         }
         s.update(self._drive)
+        s.update(self._dpc_isr())
         s.update(self.gpu.sample() if self.gpu else _GPU_ABSENT)
         return s
+
+    def _dpc_isr(self) -> dict:
+        """DPC and interrupt time as % of all CPU time, and the worst core's combined share."""
+        cur, prev = winapi.processor_times(), self._prev_cpu_times
+        self._prev_cpu_times = cur
+        if not cur or not prev or len(cur) != len(prev):
+            return dict(_DPC_UNKNOWN)
+        total = dpc = isr = 0
+        core_max = 0.0
+        for (t1, d1, i1), (t0, d0, i0) in zip(cur, prev):
+            dt, dd, di = t1 - t0, d1 - d0, i1 - i0
+            if dt <= 0:
+                continue
+            total, dpc, isr = total + dt, dpc + dd, isr + di
+            core_max = max(core_max, 100.0 * (dd + di) / dt)
+        # Counters advance in 15.6 ms scheduler ticks: over a short interval (the first sample
+        # after start-up) one tick on a core would read as a 25 % spike.
+        if total <= 0 or total / len(cur) < 0.5e7:
+            return dict(_DPC_UNKNOWN)
+        return {"dpc_pct": 100.0 * dpc / total, "isr_pct": 100.0 * isr / total,
+                "dpc_isr_core_max_pct": min(core_max, 100.0)}
 
     @staticmethod
     def _drive_space(perf: winapi.PerformanceInfo | None) -> dict:

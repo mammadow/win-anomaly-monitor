@@ -29,6 +29,7 @@ def make_sample(ts: float, **kw) -> dict:
         "user_idle_sec": 5.0, "gpu_awake": 0.0, "gpu_util_pct": 0.0, "gpu_vram_pct": 0.0,
         "gpu_temp_c": NAN, "gpu_power_w": 0.0, "gpu_clock_mhz": 0.0, "gpu_throttle": 0,
         "handles": 120_000, "processes": 350, "threads": 5_000,
+        "dpc_pct": 0.05, "isr_pct": 0.35, "dpc_isr_core_max_pct": 2.0,
     }
     s.update(kw)
     return s
@@ -65,9 +66,9 @@ class RecordingEvents:
         ev.is_open = False
         self.open_events.pop(ev.id, None)
 
-    def point(self, kind, severity, title, ts, details):
+    def point(self, kind, severity, title, ts, details, ts_end=None):
         ev = self.open(kind, severity, title, ts, details)
-        self.close(ev, ts)
+        self.close(ev, ts if ts_end is None else ts_end)
         return ev
 
     def recent(self, kinds, days):
@@ -89,6 +90,9 @@ class FakeProcs:
     def name_of(self, pid):
         return f"pid{pid}"
 
+    def cpu_seconds(self, pid, start, end):
+        return 0.0, 0.0
+
 
 class FakeMon:
     """The slice of Monitor that detectors use."""
@@ -99,6 +103,7 @@ class FakeMon:
         self.procs = FakeProcs()
         self.gpu = None
         self.model = None
+        self.ui_probe = None
         self.user_idle = False
         self.act = {"top_cpu": [], "top_io": [], "top_memory": [], "gpu_clients": [],
                     "foreground": None, "user_idle": False}

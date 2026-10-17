@@ -126,6 +126,11 @@ def cmd_status(cfg, args) -> int:
                   f"(~{(need - have) * cfg.window_sec // 60 + 1} min of running left)")
         else:
             print("  Model   : enough data; trains when the monitor runs")
+    probe = state.get("ui_probe") if running else None
+    if probe:
+        late = f", held up {probe['late_wakeups']}× (max {probe['max_late_sec']} s)" if probe.get("late_wakeups") else ""
+        print(f"  UI probe: {probe.get('threads', 0)} thread(s), {probe.get('probes', 0):,} foreground probes, "
+              f"{probe.get('freezes', 0)} freeze(s) recorded{late}")
     if state.get("ml_quiet_until") and running:
         print(f"  Note    : ML alerts paused until {state['ml_quiet_until']} (start-up / resume grace)")
     print(f"  Data    : {s['samples']['n']:,} samples, {s['windows']['n']:,} windows, "
@@ -190,6 +195,8 @@ def cmd_report(cfg, args) -> int:
             print(f"    why   : {item['text']}")
         if d.get("rarity"):
             print(f"    rarity: {d['rarity']}")
+        for clue in d.get("clues", [])[1:] if e["kind"] == "ui_freeze" else []:
+            print(f"    also  : {clue}")
         for key, label, kind in (("top_cpu", "cpu   ", "cpu"), ("top_io", "i/o   ", "io"),
                                  ("top_memory", "memory", "mem"), ("gpu_clients", "gpu   ", "gpu")):
             if d.get(key) and (args.verbose or key in ("top_cpu", "top_io", "gpu_clients")
@@ -197,11 +204,11 @@ def cmd_report(cfg, args) -> int:
                 print(f"    {label}: {_fmt_list(d[key][:4], kind)}")
         if d.get("foreground"):
             print(f"    in use: {d['foreground']}" + ("  (user away)" if d.get("user_idle") else ""))
-        if d.get("ended"):
+        if d.get("ended") and d["ended"] not in ("responded", "compositor resumed"):
             print(f"    ended : {d['ended']}")
         if args.verbose:
             skip = {"why", "rarity", "top_cpu", "top_io", "top_memory", "gpu_clients", "foreground",
-                    "user_idle", "ended"}
+                    "user_idle", "ended", "clues"}
             extra = {k: v for k, v in d.items() if k not in skip}
             if extra:
                 print(f"    detail: {json.dumps(extra, ensure_ascii=False, default=str)}")
@@ -281,7 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("-H", "--hours", type=float, default=24, help="look back this many hours (default 24)")
     rp.add_argument("-k", "--kind", action="append",
                     help="only these event kinds (anomaly, memory_pressure, gpu_thermal, "
-                         "gpu_awake_on_battery, low_disk_space, background_cpu, memory_leak, handle_leak)")
+                         "gpu_awake_on_battery, low_disk_space, ui_freeze, background_cpu, memory_leak, "
+                         "handle_leak)")
     rp.add_argument("-v", "--verbose", action="store_true", help="show every detail")
     rp.add_argument("--json", action="store_true", help="machine-readable output")
     sub.add_parser("tune", help="replay your history to see how many alerts each sensitivity gives")
