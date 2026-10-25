@@ -11,7 +11,7 @@ off, naming the process responsible. An illustrative `report` entry:
     why   : upload 18.4 MB/s (similar moments: 3.1 KB/s; higher than 100.00% of history)
     why   : CPU 31% (similar moments: 2%; higher than 99.95% of history)
     cpu   : SyncAgent.exe 2.40 cores · svchost.exe (×4) 0.31 cores
-    i/o   : SyncAgent.exe 18.9 MB/s
+    net   : SyncAgent.exe 1,290.4 MB
     in use: chrome.exe  (user away)
 ```
 
@@ -39,6 +39,7 @@ Optional settings go in `config.toml` (copy `config.example.toml`).
 | `gpu_thermal` | GPU ≥ 87 °C, or reporting thermal throttling while ≥ 75 °C, for 30 s; lists GPU clients. (This laptop's driver raises its "thermal" flag at 32–52 °C while idle, so the flag alone is ignored.) |
 | `gpu_awake_on_battery` | dGPU powered up but idle on battery for 10 min (it drains ~10–15 W); names what keeps it awake. |
 | `low_disk_space` | The system drive (C:) has < 20 GB or < 10 % free (checked once a minute). Includes the page-file size and commit limit: an auto-managed page file can only grow into free space, so with less free space than RAM the commit limit stays near RAM size and heavy loads can run out of commit. |
+| `upload_burst` | ≥ 20 MB sent within 30 s. A stealer uploads in seconds, too briefly for the ML's 30 s. Names the processes with the most network traffic during the burst, the top CPU users and the app in use. `info` if the top uploader is the app you're using; `warning` if it's anything else, or you're away. |
 | `ui_freeze` | The app in front of you didn't answer window messages for ≥ 1 s (or Windows marked it *Not Responding*). The event records when it froze and for how long, plus the exe and window class. Its scope is **app**, **desktop** (the taskbar or the desktop compositor froze at the same time) or **display** (the compositor stalled while you were typing or moving the mouse, though apps still answered). It is explained by what happened within ±3 s: the dGPU powering on/off, a DPC/interrupt storm on one core, the monitor's own sampling stalling, heavy disk I/O, memory or CPU exhaustion, and whether the frozen app was busy computing or idle-waiting. Also lists the top CPU users. `warning` if it lasted ≥ 5 s, was hung or was desktop-wide; `info` otherwise or while you were away. |
 | `background_cpu` | A process that is *not* the foreground app uses ≥ 0.8 cores for 5 min. |
 | `memory_leak` | A process's private memory grows steadily (≥ 500 MB, R² ≥ 0.8, monotone) over ≥ 1 h. |
@@ -64,7 +65,7 @@ It then improves as history accumulates; the first day is the noisiest.
 UI probe helper ─────── foreground window / taskbar / compositor round-trips ── freezes ──┐
   (own process, every 0.5 s, normal priority, not in Efficiency Mode)                    │
 1 Hz system sample ──┬── samples table (48 h)                                            │
-                     ├── rules: memory pressure, GPU thermal, dGPU on battery, low disk space,
+                     ├── rules: memory pressure, GPU thermal, dGPU on battery, low disk space, upload bursts,
                      │          UI freezes (explained by the samples ±3 s around them) ◄─┘
 5 s process sweep ───┼── rules: background CPU hog, memory/handle leaks
                      │   (+ who-was-busy history for explanations)
@@ -151,6 +152,18 @@ for 2 minutes while the resume burst settles. A wall-clock change is handled the
 advanced together, the monitor's own low-priority loop was starved (e.g. a full CPU) or the whole
 system stalled. That's logged as `Main loop stalled for …` and nothing is reset, since those seconds
 may be part of the problem being investigated.
+
+**Upload bursts.** On 2026-10-25 a stealer sent its haul in 11 s: 39 MB, peaking at 15 MB/s. The ML
+flagged that one 10-second window, but an ML event needs three in a row, so nothing was recorded. The
+`upload_burst` rule adds up the bytes sent each second instead. A burst starts once 20 MB went out within
+30 s and ends when less than half that went out over the last 30 s. Replaying the last 48 h of samples,
+it fires once: for that upload. Across two weeks of 10-second windows, 20 MB within 30 s happened 12 times,
+about once a day. To name the sender it uses each process's *other*
+I/O counter, because Windows counts socket traffic there, not in reads and writes. A test process that sent
+50 MB over TCP gained 36 MB of other I/O and no reads or writes. Device control calls are counted there
+too, but at idle no process does more than ~0.2 MB/s of them, so an uploader stands out. The per-process
+figure includes received data, so it's a ranking, not an exact byte count. Put a backup or torrent client
+in `ignore_processes` and its bursts aren't reported.
 
 **Footprint** (measured here): about 0.8 % of one core (0.03 % of the whole CPU),
 around 70 MB of RAM and about 7 ms per tick. It runs at below-normal priority in

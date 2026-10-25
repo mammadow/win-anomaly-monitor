@@ -80,12 +80,13 @@ class RecordingEvents:
 
 class FakeProcs:
     foreground_name = None
+    net = ()                       # rows top_activity reports as network (other I/O) users
 
     def top_memory(self, n=5):
         return [{"name": "big.exe", "private_mb": 9000, "processes": 1}]
 
-    def top_activity(self, since, n=5):
-        return {"cpu": [], "io": []}
+    def top_activity(self, since, n=5, until=None):
+        return {"cpu": [], "io": [], "net": list(self.net)}
 
     def name_of(self, pid):
         return f"pid{pid}"

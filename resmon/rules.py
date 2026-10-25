@@ -8,6 +8,7 @@ EventManager.
   GpuThermal           GPU thermal throttling / overheating
   GpuAwakeOnBattery    dGPU kept powered while idle on battery (drains it)
   LowDiskSpace         system drive nearly full (also stops the page file growing)
+  UploadBurst          lots of data sent within seconds (how a stealer exfiltrates)
   UiFreeze             the foreground app or the whole desktop stopped responding
   BackgroundCpu        a non-foreground process burning CPU for minutes
   Leaks                per-process private-memory and handle growth trends
@@ -425,6 +426,125 @@ class LowDiskSpace(Detector):
                     "less than RAM, the commit limit (RAM + page file) stays near RAM size and a heavy "
                     "load can run out of commit (apps crash, Windows warns of low memory) before RAM "
                     "is full. Free up space, or set a fixed page-file size."})
+
+
+class UploadBurst(Detector):
+    """
+    A lot of data sent in a short time. A stealer uploads its haul within seconds
+    (39 MB in 11 s here on 2026-10-25), too briefly for the ML, which needs 30 s of
+    rarity before it opens an event.
+
+    A burst starts when ≥ upload_burst_mb leave within upload_burst_sec, and ends once
+    less than half that went out over the last upload_burst_sec. It spans the first to
+    the last second above BUSY_BPS. Processes are ranked by their other I/O during the
+    burst, which is where Windows counts socket traffic (see processes.py).
+    """
+    kind = "upload_burst"
+    BUSY_BPS = 256e3          # seconds above this rate mark where a burst begins and ends
+    UPDATE_SEC = 60
+
+    def __init__(self, mon):
+        super().__init__(mon)
+        self.reset()
+
+    def reset(self):
+        self.recent: deque[tuple[float, float, float]] = deque()   # (ts, seconds covered, bytes/s)
+        self.burst: dict | None = None
+        self.event: Event | None = None
+        self._swept = -math.inf
+        self._last_update = 0.0
+
+    def on_sweep(self, stats, now):
+        self._swept = now
+
+    def on_sample(self, s, now):
+        limit = self.cfg.upload_burst_mb * 1e6
+        rate = s.get("net_sent_bps")
+        if limit <= 0 or _isnan(rate):
+            return
+        last = self.recent[-1][0] if self.recent else None
+        dt = now - last if last is not None and 0 < now - last <= 60 else self.cfg.sample_interval_sec
+        self.recent.append((now, dt, rate))
+        while self.recent[0][0] <= now - self.cfg.upload_burst_sec:
+            self.recent.popleft()
+        in_window = sum(d * r for _, d, r in self.recent)
+
+        b = self.burst
+        if b is None:
+            if in_window < limit:
+                return
+            busy = [e for e in self.recent if e[2] >= self.BUSY_BPS] or [self.recent[-1]]
+            first, last_busy = busy[0][0], busy[-1][0]
+            self.burst = b = {
+                "start": first - busy[0][1], "last_busy": last_busy,
+                "sent": sum(d * r for t, d, r in self.recent if t >= first),
+                "sent_busy": sum(d * r for t, d, r in self.recent if first <= t <= last_busy),
+                "peak": max(r for _, _, r in self.recent), "triggered": now,
+                "foreground": self.mon.procs.foreground_name, "away": self.mon.user_idle,
+                "suppressed": False,
+            }
+        else:
+            b["sent"] += dt * rate
+            b["peak"] = max(b["peak"], rate)
+            if rate >= self.BUSY_BPS:
+                b["last_busy"], b["sent_busy"] = now, b["sent"]
+
+        if in_window < limit / 2:
+            self._finish(b)
+        elif self.event is None:
+            # Wait for a process sweep that saw the burst, so the uploader can be named.
+            if not b["suppressed"] and self._swept >= b["triggered"]:
+                self._open(b, now)
+        elif now - self._last_update >= self.UPDATE_SEC:
+            self._last_update = now
+            if (d := self._describe(b)) is not None:
+                self.mon.events.update(self.event, b["last_busy"], **d)
+
+    def _open(self, b: dict, now: float) -> None:
+        d = self._describe(b)
+        if d is None:
+            b["suppressed"] = True
+            return
+        self.event = self.mon.events.open(self.kind, d["severity"], d["title"], b["start"], d["details"])
+        self.mon.events.update(self.event, b["last_busy"])
+        self._last_update = now
+
+    def _finish(self, b: dict) -> None:
+        self.burst = None
+        if b["suppressed"]:
+            return
+        d = self._describe(b)
+        if self.event is not None:
+            self.mon.events.close(self.event, b["last_busy"], **(d or {}))
+            self.event = None
+        elif d is not None:
+            self.mon.events.point(self.kind, d["severity"], d["title"], b["start"], d["details"],
+                                  ts_end=b["last_busy"])
+
+    def _describe(self, b: dict) -> dict | None:
+        """Title, severity and details so far; None if the top uploader is an ignored process."""
+        act = self.mon.procs.top_activity(since=b["start"], until=b["last_busy"])
+        net = act.get("net", [])
+        top = net[0] if net else None
+        if top is not None and self.ignored(top["name"]):
+            return None
+        fg, away = b["foreground"], b["away"]
+        user_driven = top is not None and top["name"] == fg and not away
+        dur = max(b["last_busy"] - b["start"], self.cfg.sample_interval_sec)
+        title = f"Uploaded {fmt_bytes(b['sent_busy'])} in {fmt_duration(dur)} (peak {fmt_bytes(b['peak'], True)})"
+        if top is None:
+            title += " — no process showed matching network I/O"
+        else:
+            who = f"from the app in use, {top['name']}" if user_driven else f"top: {top['name']}"
+            title += f" — {who} (≈{top['total_mb']:.0f} MB network I/O)"
+        return {"title": title, "severity": "info" if user_driven else "warning", "details": {
+            "sent_mb": round(b["sent_busy"] / 1e6, 1), "peak_mb_s": round(b["peak"] / 1e6, 2),
+            "duration_sec": round(dur),
+            "threshold": f"{self.cfg.upload_burst_mb:g} MB within {self.cfg.upload_burst_sec:g} s",
+            "top_net": net, "top_cpu": act.get("cpu", []),
+            "foreground": fg, "user_idle": away, "user_driven": user_driven,
+            "note": "Per-process network figures are socket traffic (sent and received) plus device "
+                    "control I/O, which Windows counts together; they only roughly match bytes sent."}}
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -162,6 +162,8 @@ def _fmt_list(rows: list[dict], kind: str) -> str:
                 parts.append(f"{r['name']}{n} {r['avg_cores']:.2f} cores")
             case "io":
                 parts.append(f"{r['name']}{n} {r['avg_mb_s']:.1f} MB/s")
+            case "net":
+                parts.append(f"{r['name']}{n} {r['total_mb']:,.1f} MB")
             case "mem":
                 parts.append(f"{r['name']}{n} {r['private_mb']:,} MB")
             case "gpu":
@@ -197,9 +199,11 @@ def cmd_report(cfg, args) -> int:
             print(f"    rarity: {d['rarity']}")
         for clue in d.get("clues", [])[1:] if e["kind"] == "ui_freeze" else []:
             print(f"    also  : {clue}")
-        for key, label, kind in (("top_cpu", "cpu   ", "cpu"), ("top_io", "i/o   ", "io"),
-                                 ("top_memory", "memory", "mem"), ("gpu_clients", "gpu   ", "gpu")):
+        for key, label, kind in (("top_net", "net   ", "net"), ("top_cpu", "cpu   ", "cpu"),
+                                 ("top_io", "i/o   ", "io"), ("top_memory", "memory", "mem"),
+                                 ("gpu_clients", "gpu   ", "gpu")):
             if d.get(key) and (args.verbose or key in ("top_cpu", "top_io", "gpu_clients")
+                               or (key == "top_net" and e["kind"] in ("upload_burst", "anomaly"))
                                or e["kind"] == "memory_pressure"):
                 print(f"    {label}: {_fmt_list(d[key][:4], kind)}")
         if d.get("foreground"):
@@ -207,7 +211,7 @@ def cmd_report(cfg, args) -> int:
         if d.get("ended") and d["ended"] not in ("responded", "compositor resumed"):
             print(f"    ended : {d['ended']}")
         if args.verbose:
-            skip = {"why", "rarity", "top_cpu", "top_io", "top_memory", "gpu_clients", "foreground",
+            skip = {"why", "rarity", "top_cpu", "top_io", "top_net", "top_memory", "gpu_clients", "foreground",
                     "user_idle", "ended", "clues"}
             extra = {k: v for k, v in d.items() if k not in skip}
             if extra:
@@ -288,8 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("-H", "--hours", type=float, default=24, help="look back this many hours (default 24)")
     rp.add_argument("-k", "--kind", action="append",
                     help="only these event kinds (anomaly, memory_pressure, gpu_thermal, "
-                         "gpu_awake_on_battery, low_disk_space, ui_freeze, background_cpu, memory_leak, "
-                         "handle_leak)")
+                         "gpu_awake_on_battery, low_disk_space, upload_burst, ui_freeze, background_cpu, "
+                         "memory_leak, handle_leak)")
     rp.add_argument("-v", "--verbose", action="store_true", help="show every detail")
     rp.add_argument("--json", action="store_true", help="machine-readable output")
     sub.add_parser("tune", help="replay your history to see how many alerts each sensitivity gives")

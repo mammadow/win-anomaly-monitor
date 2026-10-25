@@ -7,6 +7,12 @@ average), and the "System Idle Process" (3155 % on 32 threads) topped every
 snapshot. Here we sweep all processes every few seconds and compute real rates
 from cumulative counters, keyed by (pid, create_time) so PID reuse can't mix
 two processes up. Idle and the monitor itself are excluded.
+
+Socket traffic doesn't show in a process's read/write counters. Windows counts
+it as "other" I/O, together with device control calls (measured here: a process
+sending 50 MB over TCP gained 36 MB of other I/O and no reads or writes; at idle
+the largest other-I/O user, NVIDIA's display container, does ~170 KB/s). So other
+I/O is what names the process behind an upload.
 """
 
 from __future__ import annotations
@@ -32,12 +38,13 @@ class ProcStat:
     name: str
     create_time: float
     cores: float              # logical cores in use (1.0 = one thread pegged)
-    read_bps: float           # all I/O: disk, network and devices
+    read_bps: float           # file (disk or cache), pipe and device I/O
     write_bps: float
     private_bytes: int
     working_set: int
     handles: int
     foreground: bool = False
+    other_bps: float = 0.0    # socket (network) traffic and device control calls
 
     @property
     def key(self) -> tuple[int, float]:
@@ -66,6 +73,7 @@ def _psutil_snapshot() -> list[ProcInfo]:
             write_bytes=io.write_bytes if io else 0,
             threads=i.get("num_threads") or 0,
             handles=0,
+            other_bytes=getattr(io, "other_bytes", 0) if io else 0,
         ))
     return out
 
@@ -85,7 +93,7 @@ class ProcessTracker:
         self._prev_wall: float | None = None
         self._prev_mono: float | None = None
         self._history_sec = history_sec
-        # (wall_ts, dt, [(key, name, cores, io_bps), ...]) — only active processes, to stay small
+        # (wall_ts, dt, [(key, name, cores, io_bps, other_bps), ...]) — only active processes, to stay small
         self.history: deque[tuple[float, float, list[tuple]]] = deque()
         self.latest: list[ProcStat] = []
         self.by_pid: dict[int, ProcStat] = {}
@@ -110,19 +118,22 @@ class ProcessTracker:
             if p.pid == IDLE_PID or p.pid == self._self_pid:
                 continue
             prev = self._prev.get(p.key)
-            cores = r = w = 0.0
+            cores = r = w = o = 0.0
             if prev is not None and dt > 0:
                 cores = max(0.0, p.cpu_time - prev.cpu_time) / dt
                 r = max(0, p.read_bytes - prev.read_bytes) / dt
                 w = max(0, p.write_bytes - prev.write_bytes) / dt
+                o = max(0, p.other_bytes - prev.other_bytes) / dt
             elif self._prev_wall is not None and p.create_time > self._prev_wall:
                 # Started since the last sweep: everything it has done happened in this interval.
                 life = max(now_wall - p.create_time, 0.5)
                 cores, r, w = p.cpu_time / life, p.read_bytes / life, p.write_bytes / life
+                o = p.other_bytes / life
             stats.append(ProcStat(
                 pid=p.pid, name=p.name, create_time=p.create_time,
                 cores=cores, read_bps=r, write_bps=w,
                 private_bytes=p.private_bytes, working_set=p.working_set, handles=p.handles,
+                other_bps=o,
             ))
 
         self.by_pid = {s.pid: s for s in stats}
@@ -138,8 +149,8 @@ class ProcessTracker:
         self.latest = stats
 
         if dt > 0:
-            active = [(s.key, s.name, s.cores, s.io_bps) for s in stats
-                      if s.cores >= ACTIVE_CORES or s.io_bps >= ACTIVE_IO_BPS]
+            active = [(s.key, s.name, s.cores, s.io_bps, s.other_bps) for s in stats
+                      if s.cores >= ACTIVE_CORES or s.io_bps >= ACTIVE_IO_BPS or s.other_bps >= ACTIVE_IO_BPS]
             self.history.append((now_wall, dt, active))
         while self.history and self.history[0][0] < now_wall - self._history_sec:
             self.history.popleft()
@@ -152,35 +163,42 @@ class ProcessTracker:
 
     # ── Summaries used to explain events ──────────────────────────────
 
-    def top_activity(self, since: float, n: int = 5) -> dict[str, list[dict]]:
-        """Top CPU and I/O consumers since `since`, grouped by executable name."""
+    def top_activity(self, since: float, n: int = 5, until: float | None = None) -> dict[str, list[dict]]:
+        """
+        Top CPU, file I/O and network (other I/O) users since `since` (and, with
+        `until`, over the sweeps that began before it), grouped by executable name.
+        """
         cpu_s: dict[str, float] = defaultdict(float)
         io_b: dict[str, float] = defaultdict(float)
+        net_b: dict[str, float] = defaultdict(float)
         pids: dict[str, set[int]] = defaultdict(set)
         span = 0.0
         for t, dt, active in self.history:
-            if t < since:
+            if t < since or (until is not None and t - dt >= until):
                 continue
             span += dt
-            for key, name, cores, io_bps in active:
+            for key, name, cores, io_bps, other_bps in active:
                 cpu_s[name] += cores * dt
                 io_b[name] += io_bps * dt
+                net_b[name] += other_bps * dt
                 pids[name].add(key[0])
         if span <= 0:
-            return {"cpu": [], "io": []}
+            return {"cpu": [], "io": [], "net": []}
 
         def rows(totals: dict[str, float], fmt) -> list[dict]:
             ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
             return [fmt(name, v) for name, v in ranked[:n] if v > 0]
 
+        def mb(name: str, v: float) -> dict:
+            return {"name": name, "avg_mb_s": round(v / span / 1e6, 2), "total_mb": round(v / 1e6, 1),
+                    "processes": len(pids[name])}
+
         return {
             "cpu": rows(cpu_s, lambda name, v: {
                 "name": name, "avg_cores": round(v / span, 2), "processes": len(pids[name]),
             }),
-            "io": rows(io_b, lambda name, v: {
-                "name": name, "avg_mb_s": round(v / span / 1e6, 2), "total_mb": round(v / 1e6, 1),
-                "processes": len(pids[name]),
-            }),
+            "io": rows(io_b, mb),
+            "net": rows(net_b, mb),
         }
 
     def cpu_seconds(self, pid: int, start: float, end: float) -> tuple[float, float]:
@@ -190,7 +208,7 @@ class ProcessTracker:
             if t < start or t - dt > end:
                 continue
             span += dt
-            cpu += sum(cores * dt for key, _, cores, _ in active if key[0] == pid)
+            cpu += sum(cores * dt for key, _, cores, _, _ in active if key[0] == pid)
         return cpu, span
 
     def top_memory(self, n: int = 5) -> list[dict]:

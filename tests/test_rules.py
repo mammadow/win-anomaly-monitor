@@ -5,7 +5,7 @@ import pytest
 from conftest import make_sample
 from resmon.processes import ProcStat
 from resmon.rules import (AnomalyEpisodes, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, Leaks,
-                          LowDiskSpace, MemoryPressure, Sustained)
+                          LowDiskSpace, MemoryPressure, Sustained, UploadBurst)
 from resmon.sampler import THROTTLE_HW_THERMAL
 
 
@@ -159,6 +159,109 @@ def test_drive_that_recovered_warns_afresh(mon):
     r.on_sample(make_sample(180, **drive(120.0)), 180.0)                 # cleaned up
     r.on_sample(make_sample(240, **drive(19.0)), 240.0)                  # filled up again: news
     assert len(mon.events.of_kind("low_disk_space")) == 2
+
+
+# ── Upload bursts ─────────────────────────────────────────────────────
+
+# MB/s sent each second from 02:11:30 on 2026-10-25, when a stealer uploaded its haul
+EXFIL_MB_S = [0.03, 0.65, 2.95, 14.97, 13.00, 1.60, 0.49, 0.58, 0.84, 1.33, 2.21, 0.47]
+
+
+def upload(r, rates_mb_s, t0=0, quiet_after=60):
+    """Feed per-second upload rates (then quiet), with a process sweep every 5 s."""
+    rates = list(rates_mb_s) + [0.002] * quiet_after
+    for i, rate in enumerate(rates):
+        t = t0 + i
+        if t % 5 == 0:
+            r.on_sweep([], t)
+        r.on_sample(make_sample(t, net_sent_bps=rate * 1e6), t)
+    return t0 + len(rates)
+
+
+def stealer(mon):
+    mon.procs.foreground_name = "brave.exe"
+    mon.procs.net = [{"name": "ServiceModelReg.exe", "total_mb": 30.2, "avg_mb_s": 2.0, "processes": 1},
+                     {"name": "NVDisplay.Container.exe", "total_mb": 2.6, "avg_mb_s": 0.17, "processes": 1}]
+
+
+def test_stealer_upload_burst_is_reported_and_names_the_uploader(mon):
+    stealer(mon)
+    upload(UploadBurst(mon), [0.0] * 10 + EXFIL_MB_S, t0=1000)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.severity == "warning" and not ev.is_open
+    assert ev.title == ("Uploaded 39.1 MB in 11s (peak 15.0 MB/s) — "
+                        "top: ServiceModelReg.exe (≈30 MB network I/O)")
+    assert (ev.ts_start, ev.ts_end) == (1010, 1021)        # 02:11:30 to 02:11:41
+    assert ev.details["top_net"][0]["name"] == "ServiceModelReg.exe" and ev.details["foreground"] == "brave.exe"
+
+
+def test_burst_opens_once_a_process_sweep_has_seen_it(mon):
+    stealer(mon)
+    r = UploadBurst(mon)
+    for t, rate in enumerate([0.0] * 10 + EXFIL_MB_S, start=1000):
+        if t % 5 == 0:
+            r.on_sweep([], t)
+        r.on_sample(make_sample(t, net_sent_bps=rate * 1e6), t)
+        # 20 MB is crossed at 1014; the next process sweep is at 1015.
+        assert len(mon.events.of_kind("upload_burst")) == (t >= 1015)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.is_open and ev.severity == "warning"
+
+
+def test_upload_from_the_app_in_use_is_info(mon):
+    mon.procs.foreground_name = "Discord.exe"
+    mon.procs.net = [{"name": "Discord.exe", "total_mb": 45.0, "avg_mb_s": 3.0, "processes": 4}]
+    upload(UploadBurst(mon), [8.0] * 6)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.severity == "info" and "from the app in use, Discord.exe" in ev.title
+
+
+def test_upload_from_the_app_in_use_while_away_is_a_warning(mon):
+    mon.procs.foreground_name = "Discord.exe"
+    mon.procs.net = [{"name": "Discord.exe", "total_mb": 45.0, "avg_mb_s": 3.0, "processes": 4}]
+    mon.user_idle = True
+    upload(UploadBurst(mon), [8.0] * 6)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.severity == "warning" and ev.details["user_idle"]
+
+
+def test_small_uploads_and_steady_trickles_are_ignored(mon):
+    stealer(mon)
+    r = UploadBurst(mon)
+    t = upload(r, [5.0] * 3)                         # 15 MB at once
+    upload(r, [0.6] * 600, t0=t)                     # 0.6 MB/s for 10 min = 18 MB per 30 s
+    assert not mon.events.events
+
+
+def test_long_upload_is_one_event(mon):
+    stealer(mon)
+    r = UploadBurst(mon)
+    upload(r, [2.0] * 600, quiet_after=1)            # 20 MB/10 s… for 10 min
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.is_open and ev.details["sent_mb"] > 1000
+    upload(r, [], t0=601, quiet_after=40)
+    assert not ev.is_open and ev.ts_end - ev.ts_start == pytest.approx(600)
+    assert ev.title.startswith("Uploaded 1.2 GB in 10m 00s")
+
+
+def test_ignored_uploader_is_not_reported(mon):
+    mon.cfg.ignore_processes = ["servicemodelreg.exe"]
+    stealer(mon)
+    upload(UploadBurst(mon), EXFIL_MB_S)
+    assert not mon.events.events
+
+
+def test_upload_burst_rule_can_be_turned_off(mon):
+    mon.cfg.upload_burst_mb = 0
+    stealer(mon)
+    upload(UploadBurst(mon), EXFIL_MB_S)
+    assert not mon.events.events
+
+
+def test_unattributed_burst_is_still_reported(mon):
+    upload(UploadBurst(mon), EXFIL_MB_S)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.severity == "warning" and "no process showed matching network I/O" in ev.title
 
 
 # ── Per-process rules ─────────────────────────────────────────────────

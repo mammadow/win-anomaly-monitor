@@ -44,10 +44,11 @@ class ProcInfo:
     cpu_time: float         # user + kernel seconds, cumulative
     working_set: int        # bytes resident in RAM
     private_bytes: int      # bytes of committed private memory (what leaks grow)
-    read_bytes: int         # cumulative I/O bytes read (disk + network + device)
-    write_bytes: int        # cumulative I/O bytes written
+    read_bytes: int         # cumulative bytes read: files (disk or cache), pipes, devices
+    write_bytes: int        # cumulative bytes written
     threads: int
     handles: int
+    other_bytes: int = 0    # cumulative "other" I/O: socket (network) traffic and device control calls
 
     @property
     def key(self) -> tuple[int, float]:
@@ -248,6 +249,7 @@ class ProcessSnapshotter:
                 write_bytes=spi.WriteTransferCount,
                 threads=spi.NumberOfThreads,
                 handles=spi.HandleCount,
+                other_bytes=spi.OtherTransferCount,
             ))
             if spi.NextEntryOffset == 0:
                 break

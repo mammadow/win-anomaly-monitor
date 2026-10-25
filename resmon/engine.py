@@ -2,7 +2,7 @@
 The orchestrator: one `tick()` per second.
 
   sample ─┬─ store (1 Hz)
-          ├─ rules (memory pressure, GPU thermal, dGPU-on-battery, low disk space)
+          ├─ rules (memory pressure, GPU thermal, dGPU-on-battery, low disk space, upload bursts)
           ├─ UI freezes timed by the responsiveness probe → explained from the samples
           ├─ every 5 s: process sweep → rules (background CPU, leaks)
           └─ every 10 s: window → ML score → anomaly episodes → store
@@ -46,7 +46,7 @@ from .features import WindowAggregator, to_matrix
 from .processes import ProcessTracker
 from .responsiveness import ProbeProcess
 from .rules import (AnomalyEpisodes, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, Leaks,
-                    LowDiskSpace, MemoryPressure, UiFreeze)
+                    LowDiskSpace, MemoryPressure, UiFreeze, UploadBurst)
 from .sampler import GpuSampler, SystemSampler
 from .storage import Storage, load_training_windows
 
@@ -144,6 +144,7 @@ class Monitor:
             GpuThermal(self),
             GpuAwakeOnBattery(self),
             LowDiskSpace(self),
+            UploadBurst(self),
             UiFreeze(self),
             BackgroundCpu(self),
             Leaks(self),
@@ -314,6 +315,7 @@ class Monitor:
         return {
             "top_cpu": top["cpu"],
             "top_io": top["io"],
+            "top_net": top["net"],
             "top_memory": self.procs.top_memory(5),
             "gpu_clients": self.gpu_clients(),
             "foreground": self.procs.foreground_name,

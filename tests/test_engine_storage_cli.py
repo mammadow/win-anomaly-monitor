@@ -58,10 +58,11 @@ class SimProcs(ProcessTracker):
     def snapshot(self):
         return [dataclasses.replace(p) for p in self.table.values()]   # fresh objects, like the OS
 
-    def advance(self, pid, dt, cores=0.0, write_bps=0.0):
+    def advance(self, pid, dt, cores=0.0, write_bps=0.0, other_bps=0.0):
         p = self.table[pid]
         p.cpu_time += cores * dt
         p.write_bytes += int(write_bps * dt)
+        p.other_bytes += int(other_bps * dt)
 
 
 def simulate(m, sampler, procs, t0, seconds, on_tick=None):
@@ -110,6 +111,23 @@ def test_end_to_end_disk_storm_is_detected_and_attributed(sim, cfg):
     assert 90 <= ev["ts_end"] - ev["ts_start"] <= 150
     line = json.loads((cfg.data_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert line["id"] == ev["id"] and line["kind"] == "anomaly"
+
+
+def test_end_to_end_upload_burst_names_the_uploader(sim, cfg):
+    m, sampler, procs = sim
+    procs.table[300] = ProcInfo(300, "ServiceModelReg.exe", 1.0, 0.0, 60 << 20, 50 << 20, 0, 0, 12, 400)
+    t = simulate(m, sampler, procs, time.time(), 60)
+    sampler.overrides = {"net_sent_bps": 13e6}                  # 39 MB in 3 s
+    t = simulate(m, sampler, procs, t, 3, on_tick=lambda _: procs.advance(300, 1.0, cores=0.3, other_bps=10e6))
+    sampler.overrides = {}
+    simulate(m, sampler, procs, t, 60)
+    m.storage.flush()
+
+    [ev] = query_events(m.db_path, 0, ["upload_burst"])
+    assert ev["severity"] == "warning" and not ev["is_open"]
+    assert ev["title"].startswith("Uploaded 39.0 MB in 3s (peak 13.0 MB/s) — top: ServiceModelReg.exe (≈30 MB")
+    assert [p["name"] for p in ev["details"]["top_net"]] == ["ServiceModelReg.exe"]
+    assert not query_events(m.db_path, 0, ["anomaly"])          # the ML can't see it (no model, and too short)
 
 
 class FakeClocks:

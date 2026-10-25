@@ -27,6 +27,13 @@
 # low_disk_free_gb = 20
 # low_disk_free_percent = 10
 
+# Upload bursts: this many MB sent within this many seconds is reported, naming
+# the processes with the most network traffic. 0 turns the rule off. A burst
+# whose top uploader is in ignore_processes (e.g. a backup or torrent client)
+# isn't reported.
+# upload_burst_mb = 20
+# upload_burst_sec = 30
+
 # UI freezes: every ui_probe_interval_sec the foreground window (and the
 # taskbar) is sent a no-op message; not answering within ui_freeze_sec is a
 # freeze. Set ui_freeze_probe = false to turn the probe off.

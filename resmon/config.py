@@ -74,6 +74,9 @@ class MonitorConfig:
 
     gpu_awake_idle_minutes: float = 10      # on battery: dGPU awake but idle → battery drain
 
+    upload_burst_mb: float = 20             # this much sent within…  (0 turns the rule off)
+    upload_burst_sec: float = 30            # …this many seconds is an upload burst (≈1/day here)
+
     ui_freeze_probe: bool = True            # time how fast the foreground app answers window messages
     ui_freeze_sec: float = 1.0              # an app (or the desktop) not answering for this long has frozen
     ui_probe_interval_sec: float = 0.5      # how often it is asked (each probe costs microseconds)
@@ -106,6 +109,8 @@ class MonitorConfig:
             raise ValueError("window counts must be ≥ 1")
         if self.low_disk_free_gb < 0 or not 0 <= self.low_disk_free_percent < 100:
             raise ValueError("low_disk_free_gb must be ≥ 0 and low_disk_free_percent in [0, 100)")
+        if self.upload_burst_mb < 0 or not 2 * self.sample_interval_sec <= self.upload_burst_sec <= 600:
+            raise ValueError("upload_burst_mb must be ≥ 0 and upload_burst_sec in [2 samples, 600]")
         if not 0.25 <= self.ui_freeze_sec <= 60 or not 0.1 <= self.ui_probe_interval_sec <= 5:
             raise ValueError("ui_freeze_sec must be in [0.25, 60] and ui_probe_interval_sec in [0.1, 5]")
         if self.notify_min_severity not in SEVERITIES:
