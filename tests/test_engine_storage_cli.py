@@ -240,6 +240,9 @@ def test_run_loop_survives_errors_and_stops_cleanly(tmp_path):
 
 def test_background_training_produces_and_saves_a_model(cfg):
     m = Monitor(cfg, sampler=SimSampler(), procs=SimProcs(), gpu=None)
+    # Keep the scheduler from training mid-simulation: a fit still in flight on partial
+    # history would make the trainer busy, so the explicit start below would be ignored.
+    m._next_train = math.inf
     simulate(m, m.sampler, m.procs, 2_000_000.0, 400 * 10)          # 400 windows
     m.storage.flush()
     m.cfg.min_training_hours = 0.5
