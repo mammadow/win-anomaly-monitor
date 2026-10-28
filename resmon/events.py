@@ -108,25 +108,28 @@ class EventManager:
         return ev
 
     def update(self, ev: Event, ts: float, *, title: str | None = None,
-               severity: str | None = None, details: dict | None = None) -> None:
+               severity: str | None = None, details: dict | None = None,
+               allow_downgrade: bool = False) -> None:
+        """`allow_downgrade` sets `severity` as given, for a rule whose verdict can be revised."""
         prev_sev = ev.severity
-        self._apply(ev, ts, title, severity, details)
+        self._apply(ev, ts, title, severity, details, allow_downgrade)
         self.storage.update_event(ev.id, severity=ev.severity, ts_end=ev.ts_end, is_open=True,
                                   title=ev.title, details=ev.details)
-        if severity_rank(ev.severity) > severity_rank(prev_sev):
-            self._log(ev, f"escalated to {ev.severity}")
-            self._maybe_notify(ev, prev_sev)
+        self._severity_changed(ev, prev_sev)
 
     def close(self, ev: Event, ts: float, *, title: str | None = None,
-              severity: str | None = None, details: dict | None = None) -> None:
+              severity: str | None = None, details: dict | None = None,
+              allow_downgrade: bool = False) -> None:
         if not ev.is_open:
             return
-        self._apply(ev, ts, title, severity, details)
+        prev_sev = ev.severity
+        self._apply(ev, ts, title, severity, details, allow_downgrade)
         ev.is_open = False
         self.open_events.pop(ev.id, None)
         self.storage.update_event(ev.id, severity=ev.severity, ts_end=ev.ts_end, is_open=False,
                                   title=ev.title, details=ev.details)
         self._append_jsonl(ev)
+        self._severity_changed(ev, prev_sev)
         if ev.duration > 0:
             logging.info("■ [%s #%d] ended after %s", ev.kind, ev.id, fmt_duration(ev.duration))
 
@@ -166,14 +169,22 @@ class EventManager:
     # ── internals ─────────────────────────────────────────────────────
 
     @staticmethod
-    def _apply(ev, ts, title, severity, details):
+    def _apply(ev, ts, title, severity, details, allow_downgrade=False):
         ev.ts_end = max(ev.ts_end, ts)
         if title:
             ev.title = title
-        if severity and severity_rank(severity) > severity_rank(ev.severity):
-            ev.severity = severity  # severity only ever escalates within an event
+        if severity and (allow_downgrade or severity_rank(severity) > severity_rank(ev.severity)):
+            ev.severity = severity  # severity only ever escalates within an event, unless revised
         if details:
             ev.details.update(details)
+
+    def _severity_changed(self, ev: Event, prev_sev: str) -> None:
+        change = severity_rank(ev.severity) - severity_rank(prev_sev)
+        if change > 0:
+            self._log(ev, f"escalated to {ev.severity}")
+            self._maybe_notify(ev, prev_sev)
+        elif change < 0:
+            self._log(ev, f"revised down from {prev_sev}")
 
     def _log(self, ev: Event, what: str) -> None:
         level = logging.WARNING if severity_rank(ev.severity) >= 1 else logging.INFO

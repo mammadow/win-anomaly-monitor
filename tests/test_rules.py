@@ -225,6 +225,57 @@ def test_upload_from_the_app_in_use_while_away_is_a_warning(mon):
     assert ev.severity == "warning" and ev.details["user_idle"]
 
 
+NVDISPLAY = {"name": "NVDisplay.Container.exe", "total_mb": 12.0, "avg_mb_s": 1.5, "processes": 1}
+BRAVE = {"name": "brave.exe", "total_mb": 814.0, "avg_mb_s": 21.4, "processes": 7}
+
+
+@pytest.mark.parametrize("first_sweep", [[], [NVDISPLAY]], ids=["nothing yet", "device control I/O"])
+def test_upload_from_the_app_in_use_is_info_when_the_first_sweep_misses_it(mon, first_sweep):
+    # 2026-10-28: Brave uploaded 1.8 GB, ~5 MB/s and then 115 MB/s. The first sweep ranked
+    # NVDisplay.Container.exe top, so the event opened (and stayed) a warning.
+    mon.procs.foreground_name = "brave.exe"
+    mon.procs.net = first_sweep
+    r = UploadBurst(mon)
+    t = upload(r, [5.0] * 8, quiet_after=0)          # 20 MB crossed at 3; opens at the sweep at 5
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.is_open and ev.severity == "info"
+    mon.procs.net = [BRAVE, NVDISPLAY]
+    upload(r, [115.0] * 15, t0=t)
+    assert not ev.is_open and ev.severity == "info"
+    assert "from the app in use, brave.exe" in ev.title and ev.details["user_driven"]
+    assert mon.events.severities == [(ev.id, "info")]  # never a warning, so no toast
+
+
+def test_warning_waits_for_a_sweep_that_names_the_uploader(mon):
+    stealer(mon)
+    late, mon.procs.net = mon.procs.net, []
+    r = UploadBurst(mon)
+    t = upload(r, [5.0] * 8, quiet_after=0)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.is_open and ev.severity == "info"
+    mon.procs.net = late
+    upload(r, [5.0] * 3, t0=t, quiet_after=0)        # the sweep at 10 sees 30 MB of the 55 MB
+    assert ev.is_open and ev.severity == "warning" and "top: ServiceModelReg.exe" in ev.title
+
+
+def test_unattributed_long_upload_warns_after_a_minute(mon):
+    r = UploadBurst(mon)
+    upload(r, [2.0] * 120, quiet_after=0)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.is_open and ev.severity == "warning"
+
+
+def test_final_attribution_sets_the_severity_even_if_milder(mon):
+    stealer(mon)                                     # its 30 MB covers what's sent: trusted at once
+    r = UploadBurst(mon)
+    t = upload(r, [5.0] * 8, quiet_after=0)
+    [ev] = mon.events.of_kind("upload_burst")
+    assert ev.severity == "warning"
+    mon.procs.net = [BRAVE, NVDISPLAY]
+    upload(r, [115.0] * 15, t0=t)
+    assert not ev.is_open and ev.severity == "info" and ev.details["user_driven"]
+
+
 def test_small_uploads_and_steady_trickles_are_ignored(mon):
     stealer(mon)
     r = UploadBurst(mon)

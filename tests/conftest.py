@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from resmon.config import MonitorConfig  # noqa: E402
-from resmon.events import Event  # noqa: E402
+from resmon.events import Event, severity_rank  # noqa: E402
 
 NAN = math.nan
 
@@ -39,19 +39,23 @@ class RecordingEvents:
     def __init__(self):
         self.events: list[Event] = []
         self.open_events = {}
+        self.severities: list[tuple[int, str]] = []   # (event id, severity) at open and each change
 
     def open(self, kind, severity, title, ts, details):
         ev = Event(kind, severity, title, ts, ts, dict(details), id=len(self.events) + 1)
         self.events.append(ev)
+        self.severities.append((ev.id, severity))
         self.open_events[ev.id] = ev
         return ev
 
-    def update(self, ev, ts, *, title=None, severity=None, details=None):
+    def update(self, ev, ts, *, title=None, severity=None, details=None, allow_downgrade=False):
         ev.ts_end = max(ev.ts_end, ts)
         if title:
             ev.title = title
-        if severity:
-            ev.severity = severity
+        if severity and severity != ev.severity and (
+                allow_downgrade or severity_rank(severity) > severity_rank(ev.severity)):
+            ev.severity = severity                  # escalates only, like EventManager
+            self.severities.append((ev.id, severity))
         if details:
             ev.details.update(details)
 
@@ -61,8 +65,8 @@ class RecordingEvents:
         self.open_events[ev.id] = ev
         self.update(ev, ts)
 
-    def close(self, ev, ts, *, title=None, severity=None, details=None):
-        self.update(ev, ts, title=title, severity=severity, details=details)
+    def close(self, ev, ts, *, title=None, severity=None, details=None, allow_downgrade=False):
+        self.update(ev, ts, title=title, severity=severity, details=details, allow_downgrade=allow_downgrade)
         ev.is_open = False
         self.open_events.pop(ev.id, None)
 

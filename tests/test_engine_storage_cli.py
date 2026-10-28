@@ -5,6 +5,7 @@ import math
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from resmon import winapi
 from resmon.cli import main
 from resmon.detector import fit_model
 from resmon.engine import InstanceLock, Monitor
+from resmon.events import EventManager
 from resmon.processes import ProcessTracker
 from resmon.rules import Detector
 from resmon.storage import (Storage, db_summary, load_training_windows, load_windows,
@@ -128,6 +130,23 @@ def test_end_to_end_upload_burst_names_the_uploader(sim, cfg):
     assert ev["title"].startswith("Uploaded 39.0 MB in 3s (peak 13.0 MB/s) — top: ServiceModelReg.exe (≈30 MB")
     assert [p["name"] for p in ev["details"]["top_net"]] == ["ServiceModelReg.exe"]
     assert not query_events(m.db_path, 0, ["anomaly"])          # the ML can't see it (no model, and too short)
+
+
+def test_event_severity_only_escalates_unless_the_rule_revises_it(tmp_path):
+    toasts = []
+    em = EventManager(Storage(tmp_path / "m.db"), tmp_path / "events.jsonl",
+                      notifier=SimpleNamespace(send=lambda title, body: toasts.append(body)))
+    a = em.open("memory_pressure", "warning", "a", 100.0, {})
+    em.close(a, 110.0, severity="info")
+    b = em.open("upload_burst", "info", "b?", 200.0, {})
+    em.close(b, 210.0, severity="warning", title="b!")             # escalating at close warns too
+    c = em.open("upload_burst", "warning", "c", 300.0, {})
+    em.update(c, 305.0, severity="info", allow_downgrade=True)
+    em.close(c, 310.0)
+    em.close(em.open("upload_burst", "warning", "d", 400.0, {}), 410.0, severity="info", allow_downgrade=True)
+    em.storage.close()
+    assert [e["severity"] for e in query_events(tmp_path / "m.db", 0)] == ["warning", "warning", "info", "info"]
+    assert toasts == ["a", "b!", "c", "d"]
 
 
 class FakeClocks:

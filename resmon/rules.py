@@ -438,10 +438,18 @@ class UploadBurst(Detector):
     less than half that went out over the last upload_burst_sec. It spans the first to
     the last second above BUSY_BPS. Processes are ranked by their other I/O during the
     burst, which is where Windows counts socket traffic (see processes.py).
+
+    The first sweeps can rank the wrong process: on 2026-10-28 a 1.8 GB upload from Brave
+    opened naming NVDisplay.Container.exe's device control I/O (12 MB of the 33 MB sent so
+    far); Brave's 814 MB came later. So the event stays `info` until the top uploader's
+    I/O covers TRUST_SHARE of the bytes sent (or TRUST_SEC passed), and the attribution
+    over the whole burst sets the final severity, milder or not.
     """
     kind = "upload_burst"
     BUSY_BPS = 256e3          # seconds above this rate mark where a burst begins and ends
     UPDATE_SEC = 60
+    TRUST_SHARE = 0.5
+    TRUST_SEC = 60
 
     def __init__(self, mon):
         super().__init__(mon)
@@ -481,7 +489,7 @@ class UploadBurst(Detector):
                 "sent_busy": sum(d * r for t, d, r in self.recent if first <= t <= last_busy),
                 "peak": max(r for _, _, r in self.recent), "triggered": now,
                 "foreground": self.mon.procs.foreground_name, "away": self.mon.user_idle,
-                "suppressed": False,
+                "suppressed": False, "trusted": False,
             }
         else:
             b["sent"] += dt * rate
@@ -495,19 +503,30 @@ class UploadBurst(Detector):
             # Wait for a process sweep that saw the burst, so the uploader can be named.
             if not b["suppressed"] and self._swept >= b["triggered"]:
                 self._open(b, now)
-        elif now - self._last_update >= self.UPDATE_SEC:
+        elif now - self._last_update >= self.UPDATE_SEC or (not b["trusted"] and self._swept > self._last_update):
+            # Until the uploader can be trusted, look again after every sweep.
             self._last_update = now
             if (d := self._describe(b)) is not None:
-                self.mon.events.update(self.event, b["last_busy"], **d)
+                self.mon.events.update(self.event, b["last_busy"], allow_downgrade=True,
+                                       **self._held(b, d, now))
 
     def _open(self, b: dict, now: float) -> None:
         d = self._describe(b)
         if d is None:
             b["suppressed"] = True
             return
+        d = self._held(b, d, now)
         self.event = self.mon.events.open(self.kind, d["severity"], d["title"], b["start"], d["details"])
         self.mon.events.update(self.event, b["last_busy"])
         self._last_update = now
+
+    def _held(self, b: dict, d: dict, now: float) -> dict:
+        """`d`, kept at info until its top uploader can be trusted: a warning names a process."""
+        if not b["trusted"]:
+            net = d["details"]["top_net"]
+            b["trusted"] = (bool(net) and net[0]["total_mb"] * 1e6 >= self.TRUST_SHARE * b["sent_busy"]) \
+                or now - b["triggered"] >= self.TRUST_SEC
+        return d if b["trusted"] else {**d, "severity": "info"}
 
     def _finish(self, b: dict) -> None:
         self.burst = None
@@ -515,7 +534,8 @@ class UploadBurst(Detector):
             return
         d = self._describe(b)
         if self.event is not None:
-            self.mon.events.close(self.event, b["last_busy"], **(d or {}))
+            # The sweeps have now seen the whole burst: their verdict stands, even if it's milder.
+            self.mon.events.close(self.event, b["last_busy"], allow_downgrade=True, **(d or {}))
             self.event = None
         elif d is not None:
             self.mon.events.point(self.kind, d["severity"], d["title"], b["start"], d["details"],

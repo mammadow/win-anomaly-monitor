@@ -39,7 +39,7 @@ Optional settings go in `config.toml` (copy `config.example.toml`).
 | `gpu_thermal` | GPU ≥ 87 °C, or reporting thermal throttling while ≥ 75 °C, for 30 s; lists GPU clients. (This laptop's driver raises its "thermal" flag at 32–52 °C while idle, so the flag alone is ignored.) |
 | `gpu_awake_on_battery` | dGPU powered up but idle on battery for 10 min (it drains ~10–15 W); names what keeps it awake. |
 | `low_disk_space` | The system drive (C:) has < 20 GB or < 10 % free (checked once a minute). Includes the page-file size and commit limit: an auto-managed page file can only grow into free space, so with less free space than RAM the commit limit stays near RAM size and heavy loads can run out of commit. |
-| `upload_burst` | ≥ 20 MB sent within 30 s. A stealer uploads in seconds, too briefly for the ML's 30 s. Names the processes with the most network traffic during the burst, the top CPU users and the app in use. `info` if the top uploader is the app you're using; `warning` if it's anything else, or you're away. |
+| `upload_burst` | ≥ 20 MB sent within 30 s. A stealer uploads in seconds, too briefly for the ML's 30 s. Names the processes with the most network traffic during the burst, the top CPU users and the app in use. `info` if the top uploader over the whole burst is the app you're using; `warning` if it's anything else, or you're away. The warning waits until a sweep can name the uploader. |
 | `ui_freeze` | The app in front of you didn't answer window messages for ≥ 1 s (or Windows marked it *Not Responding*). The event records when it froze and for how long, plus the exe and window class. Its scope is **app**, **desktop** (the taskbar or the desktop compositor froze at the same time) or **display** (the compositor stalled while you were typing or moving the mouse, though apps still answered). It is explained by what happened within ±3 s: the dGPU powering on/off, a DPC/interrupt storm on one core, the monitor's own sampling stalling, heavy disk I/O, memory or CPU exhaustion, and whether the frozen app was busy computing or idle-waiting. Also lists the top CPU users. `warning` if it lasted ≥ 5 s, was hung or was desktop-wide; `info` otherwise or while you were away. |
 | `background_cpu` | A process that is *not* the foreground app uses ≥ 0.8 cores for 5 min. |
 | `memory_leak` | A process's private memory grows steadily (≥ 500 MB, R² ≥ 0.8, monotone) over ≥ 1 h. |
@@ -163,7 +163,11 @@ I/O counter, because Windows counts socket traffic there, not in reads and write
 50 MB over TCP gained 36 MB of other I/O and no reads or writes. Device control calls are counted there
 too, but at idle no process does more than ~0.2 MB/s of them, so an uploader stands out. The per-process
 figure includes received data, so it's a ranking, not an exact byte count. Put a backup or torrent client
-in `ignore_processes` and its bursts aren't reported.
+in `ignore_processes` and its bursts aren't reported. The first sweeps can rank the wrong process. On
+2026-10-28 a 1.8 GB upload from Brave opened naming `NVDisplay.Container.exe` (12 MB of device control I/O,
+against 33 MB sent); Brave's 814 MB showed up later. So an event stays `info` until the top uploader's I/O
+covers half the bytes sent, a minute has passed or the burst ends; only then can it become a `warning`
+(and a toast). When the burst ends, the ranking over all of it sets the final severity, even if that's milder.
 
 **Footprint** (measured here): about 0.8 % of one core (0.03 % of the whole CPU),
 around 70 MB of RAM and about 7 ms per tick. It runs at below-normal priority in
