@@ -22,6 +22,9 @@ pythonw monitor.py            # run silently (the Startup shortcut does this)
 python monitor.py             # run with console output
 python monitor.py status      # running? model state, live readings, own overhead
 python monitor.py report      # events from the last 24 h  (-H 168 for a week, -v for detail)
+python monitor.py explain     # AI & forensic root-cause analysis (latest event, or ID e.g. explain 284)
+python monitor.py ask "..."   # conversational query (e.g. 'Why did WhatsApp freeze?')
+python monitor.py diagnose    # executive system health audit of recurring bottlenecks
 python monitor.py tune        # how many alerts each sensitivity would give on your history
 python monitor.py reset       # delete all collected data and start over
 python -m pytest tests        # test suite

@@ -87,6 +87,14 @@ class MonitorConfig:
     notify: bool = False                    # Windows toast notifications
     notify_min_severity: str = "warning"
 
+    # ── AI / Conversational Diagnostics ──────────────────────────────
+    ai_provider: str = "auto"              # "auto", "ollama", "openai", "offline"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.2"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+    openai_api_key: str = ""
+
     # ── Behaviour ─────────────────────────────────────────────────────
     efficiency_mode: bool = True            # run on E-cores at low priority (Windows 11 EcoQoS)
     log_level: str = "INFO"
@@ -115,6 +123,8 @@ class MonitorConfig:
             raise ValueError("ui_freeze_sec must be in [0.25, 60] and ui_probe_interval_sec in [0.1, 5]")
         if self.notify_min_severity not in SEVERITIES:
             raise ValueError(f"notify_min_severity must be one of {SEVERITIES}")
+        if self.ai_provider not in ("auto", "ollama", "openai", "offline"):
+            raise ValueError("ai_provider must be one of: 'auto', 'ollama', 'openai', 'offline'")
         self.ignore_processes = [n.lower() for n in self.ignore_processes]
 
 

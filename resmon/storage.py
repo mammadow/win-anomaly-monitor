@@ -30,6 +30,7 @@ WINDOW_EXTRA = ["score", "anomalous", "top_procs", "fg_name"]
 
 
 def connect(path: Path, readonly: bool = False) -> sqlite3.Connection:
+    path = path.resolve()
     if readonly:
         conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=10)
     else:
@@ -222,3 +223,31 @@ def load_windows(path: Path, since: float) -> list[dict]:
         conn.close()
     nan = float("nan")
     return [{c: (nan if v is None else v) for c, v in zip(cols, r)} for r in rows]
+
+
+def get_event_by_id(path: Path, event_id: int) -> dict | None:
+    """Fetch a single event by its ID."""
+    conn = connect(path, readonly=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["details"] = json.loads(d["details"]) if d["details"] else {}
+        return d
+    finally:
+        conn.close()
+
+
+def query_samples(path: Path, start_ts: float, end_ts: float) -> list[dict]:
+    """1 Hz raw telemetry samples between start_ts and end_ts (inclusive)."""
+    conn = connect(path, readonly=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT * FROM samples WHERE ts >= ? AND ts <= ? ORDER BY ts ASC",
+            (start_ts, end_ts)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()

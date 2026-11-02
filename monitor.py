@@ -9,6 +9,9 @@ something is genuinely off — naming the process responsible.
     python  monitor.py               run with console output
     python  monitor.py status        running? model state, live readings
     python  monitor.py report        what happened in the last 24 h
+    python  monitor.py explain       AI & forensic root-cause analysis
+    python  monitor.py ask "..."     ask questions about freezes or high usage
+    python  monitor.py diagnose      executive system health audit
     python  monitor.py reset         wipe collected data
 
 See README.md for how it works and config.example.toml for tuning.

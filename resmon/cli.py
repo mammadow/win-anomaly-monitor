@@ -4,6 +4,9 @@ Command line:
   python monitor.py                run the monitor (what the startup shortcut does)
   python monitor.py status         is it running? model state, current readings
   python monitor.py report [-H N]  events from the last N hours (default 24)
+  python monitor.py explain [ID]   AI & forensic root-cause analysis of an event (default: latest)
+  python monitor.py ask "question" natural language query about recent freezes or high usage
+  python monitor.py diagnose [-H]  system health audit of recurring hardware/software friction
   python monitor.py tune           how many alerts each sensitivity would give on your history
   python monitor.py reset [--yes]  delete all collected data and start over
 """
@@ -274,6 +277,80 @@ def cmd_reset(cfg, args) -> int:
     return 0
 
 
+
+
+def cmd_explain(cfg, args) -> int:
+    from .diagnostics import build_diagnostic_prompt, collect_event_forensics, explain_event
+    from .storage import get_event_by_id, query_events
+
+    db = cfg.data_path / DB_NAME
+    if not db.exists():
+        print("No data yet.")
+        return 0
+
+    event = None
+    target_id_str = getattr(args, "event_id", "latest") or "latest"
+    if target_id_str.lower() == "latest":
+        recent = query_events(db, time.time() - 86400 * 7)
+        if recent:
+            event = recent[-1]
+    else:
+        try:
+            eid = int(target_id_str.lstrip("#"))
+            event = get_event_by_id(db, eid)
+        except ValueError:
+            print(f"Invalid event ID: {target_id_str}. Must be an integer or 'latest'.")
+            return 1
+
+    if not event:
+        print(f"Event '{target_id_str}' not found in {db}.")
+        return 1
+
+    if getattr(args, "prompt", False):
+        forensics = collect_event_forensics(db, event)
+        print(build_diagnostic_prompt(forensics, user_query=getattr(args, "question", None)))
+        return 0
+
+    result = explain_event(cfg, event, user_query=getattr(args, "question", None),
+                           force_offline=getattr(args, "offline", False))
+    print(result)
+    return 0
+
+
+def cmd_ask(cfg, args) -> int:
+    from .diagnostics import explain_event, parse_time_or_query_targets
+    from .storage import query_events
+
+    db = cfg.data_path / DB_NAME
+    if not db.exists():
+        print("No data yet.")
+        return 0
+
+    question = args.question
+    events = query_events(db, time.time() - args.hours * 3600)
+    if not events:
+        print(f"No events found in the last {args.hours:g} hours to diagnose.")
+        return 0
+
+    event, match_reason = parse_time_or_query_targets(question, events)
+    if not event:
+        print("Could not match your question to any recorded incident. Try `python monitor.py report`.")
+        return 0
+
+    print(f"🔍 Analyzing {match_reason}...")
+    result = explain_event(cfg, event, user_query=question,
+                           force_offline=getattr(args, "offline", False))
+    print(result)
+    return 0
+
+
+def cmd_diagnose(cfg, args) -> int:
+    from .diagnostics import audit_system_health
+
+    print(audit_system_health(cfg, hours=args.hours))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):      # pipes default to the ANSI code page on Windows
         if stream is not None:
@@ -299,9 +376,26 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("tune", help="replay your history to see how many alerts each sensitivity gives")
     zp = sub.add_parser("reset", help="delete all collected data")
     zp.add_argument("--yes", action="store_true", help="don't ask for confirmation")
+
+    ep = sub.add_parser("explain", help="AI & forensic explanation of a specific event")
+    ep.add_argument("event_id", nargs="?", default="latest", help="event ID (or 'latest', default: latest)")
+    ep.add_argument("-q", "--question", help="optional specific question about this event")
+    ep.add_argument("--offline", action="store_true", help="force built-in deterministic expert engine (no LLM)")
+    ep.add_argument("--prompt", action="store_true", help="output LLM prompt and payload without querying")
+
+    ak = sub.add_parser("ask", help="ask a question about recent system behavior in natural language")
+    ak.add_argument("question", help="e.g. 'Why did WhatsApp freeze?' or 'Why did my laptop stutter around 2 PM?'")
+    ak.add_argument("-H", "--hours", type=float, default=24, help="look back this many hours (default 24)")
+    ak.add_argument("--offline", action="store_true", help="force built-in deterministic expert engine")
+
+    dp = sub.add_parser("diagnose", help="run an executive system health audit over recent history")
+    dp.add_argument("-H", "--hours", type=float, default=24, help="look back this many hours (default 24)")
+
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config, data_dir=args.data_dir)
-    handler = {"run": cmd_run, "status": cmd_status, "report": cmd_report, "tune": cmd_tune,
-               "reset": cmd_reset}
+    handler = {
+        "run": cmd_run, "status": cmd_status, "report": cmd_report, "tune": cmd_tune,
+        "reset": cmd_reset, "explain": cmd_explain, "ask": cmd_ask, "diagnose": cmd_diagnose,
+    }
     return handler[args.cmd or "run"](cfg, args)

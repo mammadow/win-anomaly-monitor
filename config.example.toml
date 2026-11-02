@@ -64,3 +64,15 @@
 # raw_retention_hours = 48      # 1 Hz samples, ~20 MB/day
 # window_retention_days = 14    # 10 s windows (the model's memory)
 # event_retention_days = 180
+
+# ── AI / Conversational Diagnostics ───────────────────────────────────
+# How `monitor.py explain` and `monitor.py ask` generate diagnostic insights.
+# Options: "auto" (tries Ollama, then OpenAI API if set, otherwise offline expert engine),
+#          "ollama" (local Ollama server), "openai" (OpenAI-compatible REST API),
+#          "offline" (built-in zero-dependency deterministic diagnostic reasoning engine).
+# ai_provider = "auto"
+# ollama_url = "http://127.0.0.1:11434"
+# ollama_model = "llama3.2"
+# openai_base_url = "https://api.openai.com/v1"
+# openai_model = "gpt-4o-mini"
+# openai_api_key = ""    # or set OPENAI_API_KEY environment variable
