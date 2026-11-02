@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resmon"
+version = "3.1.0"
+description = "Background ML System Resource Monitor, Forensic Anomaly Detector, and AI Diagnostics for Windows 11"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "mammadow", email = "mammadow.elnur@gmail.com" }
+]
+keywords = [
+    "windows",
+    "resource-monitor",
+    "system-diagnostics",
+    "anomaly-detection",
+    "machine-learning",
+    "performance",
+    "nvml",
+    "ollama",
+    "forensics",
+]
+classifiers = [
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Hardware",
+]
+dependencies = [
+    "psutil>=5.9.0",
+    "numpy>=1.24.0",
+    "nvidia-ml-py>=12.535.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mammadow/win-anomaly-monitor"
+Repository = "https://github.com/mammadow/win-anomaly-monitor.git"
+Issues = "https://github.com/mammadow/win-anomaly-monitor/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
