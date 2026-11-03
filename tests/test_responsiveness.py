@@ -309,7 +309,8 @@ def test_probe_calls_against_real_windows():
     assert winapi.send_null(tb, 2000) == (True, 0) and not winapi.is_hung_window(tb)
     assert winapi.boost_current_thread() in (True, False)
     up, unbiased = winapi.sleep_clocks()
-    assert up >= unbiased > 0
+    # GetTickCount64 (15.6ms quantum) can lag high-precision interrupt time by up to ~20ms on fresh boot
+    assert up >= unbiased - 0.05 and unbiased > 0
 
 
 # ── Explaining a freeze ───────────────────────────────────────────────
