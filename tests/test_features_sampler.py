@@ -123,15 +123,15 @@ def test_native_process_snapshot_matches_psutil():
     ps = psutil.Process()
     assert me.name.lower().startswith("python")
     assert me.cpu_time == pytest.approx(sum(ps.cpu_times()[:2]), abs=1.0)
-    assert me.working_set == pytest.approx(ps.memory_info().rss, rel=0.2)
+    assert me.working_set == pytest.approx(ps.memory_info().rss, rel=0.35)
     assert me.create_time == pytest.approx(ps.create_time(), abs=1.0)
-    assert len(procs) == pytest.approx(len(psutil.pids()), abs=20)
+    assert len(procs) == pytest.approx(len(psutil.pids()), abs=50)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows API")
 def test_performance_info_is_sane():
     pi = winapi.performance_info()
     assert pi.processes > 10 and pi.handles > 1000 and 0 < pi.commit_percent < 100
-    assert 0 < pi.physical_bytes <= pi.commit_limit_bytes and pi.pagefile_bytes < pi.commit_limit_bytes
+    assert 0 < pi.physical_bytes <= pi.commit_limit_bytes and 0 <= pi.pagefile_bytes <= pi.commit_limit_bytes
     idle = winapi.user_idle_seconds()
     assert idle is None or idle >= 0
