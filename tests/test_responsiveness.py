@@ -393,13 +393,12 @@ def test_dpc_and_interrupt_time_are_sampled():
     assert all(total >= dpc + isr >= 0 for total, dpc, isr in times)
     sm = SystemSampler(gpu=None)
     assert math.isnan(sm.sample(0.5)["dpc_isr_core_max_pct"])     # too short to resolve 15.6 ms ticks
-    s = None
-    for _ in range(10):
-        time.sleep(0.4)
-        s = sm.sample(1.0)
-        if not math.isnan(s["dpc_pct"]):
-            break
-    assert s is not None and not math.isnan(s["dpc_pct"])
+    time.sleep(0.8)
+    s = sm.sample(1.0)
+    if math.isnan(s["dpc_pct"]):
+        time.sleep(0.8)
+        s = sm.sample(2.0)
+    assert not math.isnan(s["dpc_pct"])
     assert 0 <= s["dpc_pct"] < 50 and 0 <= s["isr_pct"] < 50
     assert s["dpc_pct"] + s["isr_pct"] <= s["dpc_isr_core_max_pct"] + 1e-9 <= 100
 
