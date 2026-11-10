@@ -5,8 +5,14 @@ data/
 # Local settings (copy config.example.toml → config.toml)
 config.toml
 
-# Python
+# Python (legacy)
 __pycache__/
 *.py[cod]
 .pytest_cache/
 *.tmp
+
+# Local agent instructions (never commit/push)
+GEMINI.md
+
+# Rust build artifacts
+/target/
