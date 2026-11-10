@@ -642,4 +642,10 @@ fn test_native_rust_avx2_ecoqos_nvml_and_throttle_benefits() {
     gt.on_sample(&mut mon, &hot_throttle, 200.0);
     gt.on_sample(&mut mon, &hot_throttle, 210.0);
     assert!(mon.events.events.iter().any(|e| e.kind == "gpu_thermal"));
+
+    // 5. Verify ghost-window check & cmdline_attribution toggle
+    assert!(winapi::real_window_from_ghost(0).is_none());
+    let mut pt_no_cmd = ProcessTracker::new(30.0);
+    pt_no_cmd.cmdline_attribution = false;
+    let _ = pt_no_cmd.sweep(unix_now());
 }

@@ -56,6 +56,7 @@ pub struct MonitorConfig {
     pub dpc_storm_pct: f64,
 
     // Process behavior detectors
+    pub cmdline_attribution: bool,
     pub background_cpu_cores: f64,
     pub background_cpu_sustain_sec: f64,
     pub leak_history_hours: f64,
@@ -122,6 +123,7 @@ impl Default for MonitorConfig {
             ui_freeze_sustain_sec: 1.0,
             ui_severe_freeze_sec: 5.0,
             dpc_storm_pct: 15.0,
+            cmdline_attribution: true,
             background_cpu_cores: 1.5,
             background_cpu_sustain_sec: 600.0,
             leak_history_hours: 6.0,
@@ -375,6 +377,7 @@ fn known_fields() -> HashSet<&'static str> {
         "ui_freeze_sustain_sec",
         "ui_severe_freeze_sec",
         "dpc_storm_pct",
+        "cmdline_attribution",
         "background_cpu_cores",
         "background_cpu_sustain_sec",
         "leak_history_hours",

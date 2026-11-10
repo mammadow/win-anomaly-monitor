@@ -86,6 +86,7 @@ fn top_loop(
 ) -> Result<(), String> {
     let mut sampler = SystemSampler::new(cfg);
     let mut procs = ProcessTracker::new(30.0);
+    procs.cmdline_attribution = cfg.cmdline_attribution;
     let storage = Storage::open_readonly(&cfg.db_path()).ok();
 
     let _ = procs.sweep(unix_now());

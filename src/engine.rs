@@ -166,7 +166,8 @@ impl Monitor {
         let sampler = SystemSampler::new(&cfg);
         let aggregator = WindowAggregator::new(cfg.window_sec);
         let proc_hist_sec = (cfg.window_sec as f64 * 6.0).max(120.0);
-        let procs = ProcessTracker::new(proc_hist_sec);
+        let mut procs = ProcessTracker::new(proc_hist_sec);
+        procs.cmdline_attribution = cfg.cmdline_attribution;
         let events = EventManager::new(&cfg);
         let trainer = Trainer::new(&cfg.data_dir);
         let model = trainer.load_saved(cfg.retrain_interval_min * 60.0 * 4.0);

@@ -330,6 +330,7 @@ extern "system" {
     fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> HWND;
     fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
     fn GetWindowTextW(hWnd: HWND, lpString: *mut u16, nMaxCount: i32) -> i32;
+    fn GetClassNameW(hWnd: HWND, lpClassName: *mut u16, nMaxCount: i32) -> i32;
     fn SendMessageTimeoutW(
         hWnd: HWND,
         Msg: u32,
@@ -1122,8 +1123,25 @@ pub fn is_hung_window(hwnd: usize) -> bool {
     unsafe { IsHungAppWindow(hwnd as HWND) != 0 }
 }
 
-/// If `hwnd` is a `(Not Responding)` ghost window owned by `dwm.exe`, return the real hung window.
+/// Return the Win32 window class name (`""` on failure).
+pub fn window_class_name(hwnd: usize) -> String {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetClassNameW(hwnd as HWND, buf.as_mut_ptr(), buf.len() as i32) };
+    if n > 0 {
+        OsString::from_wide(&buf[..n as usize])
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// If `hwnd` is a `(Not Responding)` DWM `"Ghost"` window, resolve the real underlying hung window.
+/// Checks `GetClassNameW` first so responsive non-Ghost windows never trigger `GetProcAddress`.
 pub fn real_window_from_ghost(hwnd: usize) -> Option<usize> {
+    if window_class_name(hwnd) != "Ghost" {
+        return None;
+    }
     static FN_PTR: std::sync::OnceLock<Option<unsafe extern "system" fn(HWND) -> HWND>> =
         std::sync::OnceLock::new();
     let func_opt = FN_PTR.get_or_init(|| unsafe {

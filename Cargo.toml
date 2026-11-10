@@ -6,6 +6,7 @@ authors = ["Elnur Mammadov"]
 description = "Lightweight Windows 11 resource & anomaly monitor with adaptive kNN detection, deep process/service attribution, HighQoS UI responsiveness probing, and AI-assisted forensic diagnostics."
 license = "MIT"
 repository = "https://github.com/mammadow/win-anomaly-monitor"
+build = "build.rs"
 default-run = "resmon"
 
 [[bin]]
@@ -38,4 +39,3 @@ rand = "0.8"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-strip = "symbols"

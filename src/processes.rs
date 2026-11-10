@@ -45,6 +45,7 @@ struct PrevProc {
 pub struct ProcessTracker {
     pub history_sec: f64,
     pub n_cpus: usize,
+    pub cmdline_attribution: bool,
     buf: Vec<u8>,
     prev: HashMap<ProcKey, PrevProc>,
     cmdline_cache: HashMap<ProcKey, Option<String>>,
@@ -62,6 +63,7 @@ impl ProcessTracker {
         Self {
             history_sec,
             n_cpus,
+            cmdline_attribution: true,
             buf: vec![0u8; 1024 * 1024],
             prev: HashMap::new(),
             cmdline_cache: HashMap::new(),
@@ -158,7 +160,7 @@ impl ProcessTracker {
             }
             return raw_name.to_string();
         }
-        if winapi::needs_cmdline_tag(raw_name) {
+        if self.cmdline_attribution && winapi::needs_cmdline_tag(raw_name) {
             let tag_opt = self
                 .cmdline_cache
                 .entry(key)

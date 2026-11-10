@@ -53,6 +53,8 @@
 
 # Processes you never want blamed (case-insensitive executable names).
 # ignore_processes = ["MsMpEng.exe", "SearchIndexer.exe"]
+# Disambiguate python/node/pwsh command lines (set false on strict AV hosts)
+# cmdline_attribution = true
 
 # ── Notifications ─────────────────────────────────────────────────────
 # Windows toast notifications for events at or above notify_min_severity

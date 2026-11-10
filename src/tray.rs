@@ -147,6 +147,22 @@ extern "system" {
     fn Shell_NotifyIconW(dwMessage: DWORD, lpData: *mut NOTIFYICONDATAW) -> BOOL;
 }
 
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleHandleW(lpModuleName: *const u16) -> HANDLE;
+}
+
+unsafe fn load_app_icon() -> HANDLE {
+    let hmod = GetModuleHandleW(null());
+    if !hmod.is_null() {
+        let icon = LoadIconW(hmod, 1usize as *const u16);
+        if !icon.is_null() {
+            return icon;
+        }
+    }
+    LoadIconW(null_mut(), IDI_APPLICATION)
+}
+
 pub struct TrayController {
     stop: Arc<AtomicBool>,
     tooltip: Arc<Mutex<String>>,
@@ -409,7 +425,7 @@ pub fn show_balloon_notification(title: &str, body: &str, severity: &str) {
             nid.hWnd = hwnd;
             nid.uID = 2;
             nid.uFlags = NIF_ICON | NIF_TIP | NIF_INFO;
-            nid.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+            nid.hIcon = load_app_icon();
             fill_wide(&mut nid.szTip, "resmon v4.0");
             apply_balloon_fields(&mut nid, &t, &b, &s);
             let _ = Shell_NotifyIconW(NIM_ADD, &mut nid);
