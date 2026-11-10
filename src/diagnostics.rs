@@ -51,12 +51,12 @@ fn extract_client_names(v: &Value) -> Vec<String> {
             if let Some(s) = item.as_str() {
                 Some(s.to_string())
             } else {
-                item.get("name")
-                    .and_then(|n| n.as_str())
-                    .map(|n| match item.get("sm_util_pct").and_then(|u| u.as_f64()) {
+                item.get("name").and_then(|n| n.as_str()).map(|n| {
+                    match item.get("sm_util_pct").and_then(|u| u.as_f64()) {
                         Some(u) if u > 0.0 => format!("{} ({:.0}%)", n, u),
                         _ => n.to_string(),
-                    })
+                    }
+                })
             }
         })
         .collect()
@@ -279,10 +279,7 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
     let sev = ev["severity"].as_str().unwrap_or("info").to_uppercase();
     let dur = ev["duration_sec"].as_f64().unwrap_or(0.0);
     let samples = &ctx["sample_summary"]["metrics"];
-    let nearby = ctx["nearby_events"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let nearby = ctx["nearby_events"].as_array().cloned().unwrap_or_default();
 
     let mut lines = vec![
         format!(
@@ -333,9 +330,8 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                 || ctx["sample_summary"]["gpu_transitions"]
                     .as_array()
                     .map(|arr| {
-                        arr.iter().any(|t| {
-                            t.as_str().map(|s| s.contains("woke")).unwrap_or(false)
-                        })
+                        arr.iter()
+                            .any(|t| t.as_str().map(|s| s.contains("woke")).unwrap_or(false))
                     })
                     .unwrap_or(false);
 
@@ -388,11 +384,9 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                 cause, cause_exp
             ));
 
-            let app_cores_opt = conc["stalled_proc_cores"].as_f64().or_else(|| {
-                d["app_cpu_sec"]
-                    .as_f64()
-                    .map(|c| c / dur.max(0.25))
-            });
+            let app_cores_opt = conc["stalled_proc_cores"]
+                .as_f64()
+                .or_else(|| d["app_cpu_sec"].as_f64().map(|c| c / dur.max(0.25)));
             if let Some(sc) = app_cores_opt {
                 if sc >= 0.7 {
                     evidence.push(format!(
@@ -485,7 +479,9 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                     ));
                 }
             }
-            actions.push("Update network adapter, GPU (`nvlddmkm.sys`), and chipset drivers.".to_string());
+            actions.push(
+                "Update network adapter, GPU (`nvlddmkm.sys`), and chipset drivers.".to_string(),
+            );
             actions.push("If on Wi-Fi or USB Docks, test whether unplugging the dock or switching power plans stops the DPC spikes.".to_string());
         }
         "memory_pressure" => {
@@ -498,12 +494,24 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
             if ram == 0.0 && commit == 0.0 {
                 let title = ev["title"].as_str().unwrap_or("");
                 if let Some(r_idx) = title.find("RAM ") {
-                    if let Ok(v) = title[r_idx + 4..].split('%').next().unwrap_or("").trim().parse::<f64>() {
+                    if let Ok(v) = title[r_idx + 4..]
+                        .split('%')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .parse::<f64>()
+                    {
                         ram = v;
                     }
                 }
                 if let Some(c_idx) = title.find("commit ") {
-                    if let Ok(v) = title[c_idx + 7..].split('%').next().unwrap_or("").trim().parse::<f64>() {
+                    if let Ok(v) = title[c_idx + 7..]
+                        .split('%')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .parse::<f64>()
+                    {
                         commit = v;
                     }
                 }
@@ -545,7 +553,10 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                     evidence.push(format!("Top memory consumers: {}.", fmt_list.join("; ")));
                 }
             }
-            actions.push("Close or cap worker counts for the largest memory consumers listed above.".to_string());
+            actions.push(
+                "Close or cap worker counts for the largest memory consumers listed above."
+                    .to_string(),
+            );
             actions.push("Ensure Windows pagefile is system-managed on a fast NVMe drive with at least 15 GB free space.".to_string());
         }
         "anomaly" => {
@@ -617,7 +628,11 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                         .take(3)
                         .map(|c| {
                             if let Some(avg_mb) = c.get("avg_mb_s").and_then(|v| v.as_f64()) {
-                                format!("{} ({:.1} MB/s)", c["name"].as_str().unwrap_or("?"), avg_mb)
+                                format!(
+                                    "{} ({:.1} MB/s)",
+                                    c["name"].as_str().unwrap_or("?"),
+                                    avg_mb
+                                )
                             } else {
                                 format!(
                                     "{} ({:.1}R/{:.1}W MB/s)",
@@ -651,9 +666,7 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                 ));
             } else {
                 let rate = d["handles_per_hour"].as_i64();
-                let rate_str = rate
-                    .map(|r| format!(" (+{}/h)", r))
-                    .unwrap_or_default();
+                let rate_str = rate.map(|r| format!(" (+{}/h)", r)).unwrap_or_default();
                 root_cause.push(format!(
                     "`{}` (PID {}) holds {} kernel handles{} after {} h of observation.",
                     proc_name,
@@ -691,7 +704,10 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                     d["gpu_clock_mhz"].as_f64().unwrap_or(0.0),
                     c_str
                 ));
-                actions.push("Ensure laptop vents are unobstructed and fan curves are functioning.".to_string());
+                actions.push(
+                    "Ensure laptop vents are unobstructed and fan curves are functioning."
+                        .to_string(),
+                );
             } else {
                 root_cause.push(format!(
                     "Discrete GPU was held awake in P-state on battery power (~{:.1} W idle drain) by `{}` despite <5% GPU utilization.",
@@ -742,7 +758,11 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                         if top_name.is_empty() {
                             top_name = nm.to_string();
                         }
-                        format!("{} (≈{:.1} MB net/other I/O)", nm, p["total_mb"].as_f64().unwrap_or(0.0))
+                        format!(
+                            "{} (≈{:.1} MB net/other I/O)",
+                            nm,
+                            p["total_mb"].as_f64().unwrap_or(0.0)
+                        )
                     })
                     .collect();
                 if !s.is_empty() {
@@ -755,12 +775,19 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                     evidence.push(format!("Top concurrent I/O process: `{}`.", nm));
                 }
             }
-            if let Some(fg) = d["foreground"].as_str().or_else(|| d["activity"]["foreground"].as_str()) {
+            if let Some(fg) = d["foreground"]
+                .as_str()
+                .or_else(|| d["activity"]["foreground"].as_str())
+            {
                 let driven = d["user_driven"].as_bool().unwrap_or(false);
                 evidence.push(format!(
                     "Foreground app: `{}` ({}).",
                     fg,
-                    if driven { "user-driven upload" } else { "background transfer" }
+                    if driven {
+                        "user-driven upload"
+                    } else {
+                        "background transfer"
+                    }
                 ));
             }
             if !top_name.is_empty() {
@@ -781,7 +808,10 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
             actions.push("Clear temporary build artifacts, temp folders, or old downloads on the system drive.".to_string());
         }
         _ => {
-            root_cause.push(format!("Event recorded: {}", ev["title"].as_str().unwrap_or("")));
+            root_cause.push(format!(
+                "Event recorded: {}",
+                ev["title"].as_str().unwrap_or("")
+            ));
         }
     }
 
@@ -814,7 +844,10 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
         if !trans.is_empty() {
             let s: Vec<&str> = trans.iter().filter_map(|v| v.as_str()).take(4).collect();
             if !s.is_empty() {
-                evidence.push(format!("dGPU power transitions near event: {}.", s.join(", ")));
+                evidence.push(format!(
+                    "dGPU power transitions near event: {}.",
+                    s.join(", ")
+                ));
             }
         }
     }
@@ -832,10 +865,7 @@ pub fn offline_explain_event(ctx: &Value, question: Option<&str>) -> String {
                 )
             })
             .collect();
-        evidence.push(format!(
-            "Correlated nearby events: {}.",
-            corr.join(", ")
-        ));
+        evidence.push(format!("Correlated nearby events: {}.", corr.join(", ")));
     }
 
     lines.push("Root Cause Analysis:".to_string());
@@ -1025,11 +1055,16 @@ pub fn match_question_events(events: &[EventRecord], question: &str) -> Vec<Even
         ("dpc_storm", &["dpc", "isr", "interrupt", "driver", "audio"]),
         (
             "memory_pressure",
-            &["ram", "memory", "commit", "pagefile", "paging", "oom", "swap"],
+            &[
+                "ram", "memory", "commit", "pagefile", "paging", "oom", "swap",
+            ],
         ),
         ("memory_leak", &["leak", "growing memory"]),
         ("handle_leak", &["handle", "handles", "acer"]),
-        ("gpu_thermal", &["hot", "temp", "thermal", "overheat", "gpu"]),
+        (
+            "gpu_thermal",
+            &["hot", "temp", "thermal", "overheat", "gpu"],
+        ),
         (
             "gpu_battery_drain",
             &["battery", "drain", "optimus", "awake", "power"],
@@ -1042,9 +1077,15 @@ pub fn match_question_events(events: &[EventRecord], question: &str) -> Vec<Even
             "upload_burst",
             &["upload", "network", "bandwidth", "net", "sent"],
         ),
-        ("low_disk_space", &["disk", "space", "storage", "drive", "free"]),
+        (
+            "low_disk_space",
+            &["disk", "space", "storage", "drive", "free"],
+        ),
         ("background_cpu", &["background", "cpu", "fan", "spinning"]),
-        ("anomaly", &["unusual", "anomaly", "strange", "weird", "spike"]),
+        (
+            "anomaly",
+            &["unusual", "anomaly", "strange", "weird", "spike"],
+        ),
     ];
 
     let mut matched_kinds = Vec::new();
@@ -1083,11 +1124,7 @@ pub fn ask_question(
         .first()
         .and_then(|e| build_event_context(storage, cfg, Some(e.id), None));
 
-    let matched_json: Vec<Value> = matched
-        .iter()
-        .take(10)
-        .map(event_record_to_json)
-        .collect();
+    let matched_json: Vec<Value> = matched.iter().take(10).map(event_record_to_json).collect();
     let payload = json!({
         "question": question,
         "lookback_hours": hours,
@@ -1320,7 +1357,7 @@ pub fn audit_system_health(storage: &Storage, cfg: &MonitorConfig, hours: f64) -
             *by_proc.entry(p).or_insert(0) += 1;
         }
         let mut top_f: Vec<(String, usize)> = by_proc.into_iter().collect();
-        top_f.sort_by(|a, b| b.1.cmp(&a.1));
+        top_f.sort_by_key(|a| std::cmp::Reverse(a.1));
         let top_str = top_f
             .into_iter()
             .take(3)
@@ -1456,7 +1493,10 @@ pub fn audit_system_health(storage: &Storage, cfg: &MonitorConfig, hours: f64) -
         crit_count
     )];
     if findings.is_empty() {
-        lines.push("  No significant performance anomalies, leaks, or resource pressure detected.".to_string());
+        lines.push(
+            "  No significant performance anomalies, leaks, or resource pressure detected."
+                .to_string(),
+        );
     } else {
         lines.push(String::new());
         lines.push("Key Findings:".to_string());

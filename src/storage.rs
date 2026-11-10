@@ -181,9 +181,10 @@ impl Storage {
         }
         for &col in cols {
             if !have.contains(col) {
-                let _ = self
-                    .conn
-                    .execute(&format!("ALTER TABLE {} ADD COLUMN {} REAL", table, col), []);
+                let _ = self.conn.execute(
+                    &format!("ALTER TABLE {} ADD COLUMN {} REAL", table, col),
+                    [],
+                );
             }
         }
     }
@@ -294,8 +295,8 @@ impl Storage {
         while let Ok(Some(r)) = rows_iter.next() {
             let ts: f64 = r.get::<_, Option<f64>>(0).ok().flatten().unwrap_or(0.0);
             let mut feat = [f64::NAN; NUM_FEATURES];
-            for j in 0..NUM_FEATURES {
-                feat[j] = r
+            for (j, slot) in feat.iter_mut().enumerate() {
+                *slot = r
                     .get::<_, Option<f64>>(j + 1)
                     .ok()
                     .flatten()
@@ -359,12 +360,7 @@ impl Storage {
         out
     }
 
-    pub fn query_events(
-        &self,
-        since: f64,
-        kind: Option<&str>,
-        limit: usize,
-    ) -> Vec<EventRecord> {
+    pub fn query_events(&self, since: f64, kind: Option<&str>, limit: usize) -> Vec<EventRecord> {
         let mut out = Vec::new();
         if let Some(k) = kind {
             let sql = "SELECT id, ts_start, ts_end, is_open, kind, severity, title, details FROM events WHERE (ts_end >= ?1 OR ts_start >= ?1 OR is_open = 1) AND kind = ?2 ORDER BY ts_start DESC LIMIT ?3";
@@ -501,7 +497,11 @@ fn parse_event_row(r: &rusqlite::Row<'_>) -> Option<EventRecord> {
     let kind: String = r.get(4).ok()?;
     let severity: String = r.get(5).ok()?;
     let title: String = r.get(6).ok()?;
-    let det_str: String = r.get::<_, Option<String>>(7).ok().flatten().unwrap_or_default();
+    let det_str: String = r
+        .get::<_, Option<String>>(7)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let details: Value = serde_json::from_str(&det_str).unwrap_or_else(|_| json!({}));
     Some(EventRecord {
         id,
@@ -540,11 +540,9 @@ pub fn db_summary(path: &Path) -> Value {
         .query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))
         .unwrap_or(0);
     let (nw, t0, t1): (i64, Option<f64>, Option<f64>) = conn
-        .query_row(
-            "SELECT COUNT(*), MIN(ts), MAX(ts) FROM windows",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
+        .query_row("SELECT COUNT(*), MIN(ts), MAX(ts) FROM windows", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
         .unwrap_or((0, None, None));
     let ne: i64 = conn
         .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))

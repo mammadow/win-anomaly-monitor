@@ -307,7 +307,9 @@ pub fn cmd_status(cfg: &MonitorConfig) -> i32 {
             let trained_ago_min = m["trained_ago_min"].as_f64().unwrap_or_else(|| {
                 m["trained"]
                     .as_str()
-                    .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok())
+                    .and_then(|s| {
+                        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok()
+                    })
                     .and_then(|ndt| ndt.and_local_timezone(Local).single())
                     .map(|dt| ((unix_now() - dt.timestamp() as f64) / 60.0).max(0.0))
                     .unwrap_or(0.0)
@@ -337,11 +339,7 @@ pub fn cmd_status(cfg: &MonitorConfig) -> i32 {
                         .as_str()
                         .or_else(|| ev["kind"].as_str())
                         .unwrap_or("info");
-                    println!(
-                        "  [{}] {}",
-                        tag,
-                        ev["title"].as_str().unwrap_or("")
-                    );
+                    println!("  [{}] {}", tag, ev["title"].as_str().unwrap_or(""));
                 }
             }
         }
@@ -475,10 +473,7 @@ pub fn cmd_explain(
     };
 
     if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&res).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
     } else {
         println!(
             "[Diagnostics Engine: {}]\n",
@@ -509,10 +504,7 @@ pub fn cmd_ask(
     };
     let res = ask_question(&st, cfg, question, hours, offline);
     if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&res).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
     } else {
         println!(
             "[Diagnostics Engine: {}]\n",
@@ -537,10 +529,7 @@ pub fn cmd_diagnose(cfg: &MonitorConfig, hours: f64, json_out: bool) -> i32 {
     };
     let res = audit_system_health(&st, cfg, hours);
     if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&res).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&res).unwrap_or_default());
     } else {
         println!("{}", res["report"].as_str().unwrap_or(""));
     }
@@ -569,16 +558,8 @@ pub fn cmd_tune(cfg: &MonitorConfig, days: Option<f64>) -> i32 {
         );
         return 0;
     }
-    let rows = tune_grid(
-        &windows,
-        cfg,
-        &[0.0005, 0.001, 0.002, 0.005],
-        &[2, 3, 6],
-    );
-    let span_days = rows
-        .first()
-        .and_then(|r| r["days"].as_f64())
-        .unwrap_or(0.0);
+    let rows = tune_grid(&windows, cfg, &[0.0005, 0.001, 0.002, 0.005], &[2, 3, 6]);
+    let span_days = rows.first().and_then(|r| r["days"].as_f64()).unwrap_or(0.0);
     println!(
         "Replayed {} windows ({:.2} days):\n",
         windows.len(),
@@ -607,12 +588,13 @@ pub fn cmd_tune(cfg: &MonitorConfig, days: Option<f64>) -> i32 {
 
 pub fn cmd_reset(cfg: &MonitorConfig, yes: bool) -> i32 {
     if !yes {
-        print!("Delete all recorded metrics, events, and learned model in {:?}? [y/N] ", cfg.data_dir);
+        print!(
+            "Delete all recorded metrics, events, and learned model in {:?}? [y/N] ",
+            cfg.data_dir
+        );
         let _ = io::stdout().flush();
         let mut ans = String::new();
-        if io::stdin().read_line(&mut ans).is_err()
-            || !ans.trim().eq_ignore_ascii_case("y")
-        {
+        if io::stdin().read_line(&mut ans).is_err() || !ans.trim().eq_ignore_ascii_case("y") {
             println!("Aborted.");
             return 0;
         }
@@ -645,7 +627,7 @@ pub fn cmd_reset(cfg: &MonitorConfig, yes: bool) -> i32 {
 pub fn parse_and_run_from<I, T>(itr: I) -> i32
 where
     I: IntoIterator<Item = T>,
-    T: Into< std::ffi::OsString > + Clone,
+    T: Into<std::ffi::OsString> + Clone,
 {
     let args = match CliArgs::try_parse_from(itr) {
         Ok(a) => a,

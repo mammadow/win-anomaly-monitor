@@ -146,9 +146,7 @@ fn top_loop(
                             ui_state.modal_scroll = ui_state.modal_scroll.saturating_sub(1);
                         }
                         KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                        KeyCode::Char('c')
-                            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             break
                         }
                         _ => {}
@@ -156,9 +154,7 @@ fn top_loop(
                 } else {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
-                        KeyCode::Char('c')
-                            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             break
                         }
                         KeyCode::Tab | KeyCode::Char('i') | KeyCode::Char('I') => {
@@ -288,15 +284,21 @@ fn draw_dashboard(
         )),
     ]);
     let line2 = Line::from(vec![
-        Span::styled(format!(" {} ", gpu_str), Style::default().fg(Color::Magenta)),
+        Span::styled(
+            format!(" {} ", gpu_str),
+            Style::default().fg(Color::Magenta),
+        ),
         Span::raw(" | "),
         Span::styled(probe_str, Style::default().fg(Color::Green)),
         Span::raw(" | "),
         Span::styled(model_str, Style::default().fg(Color::Yellow)),
         Span::raw("  [Tab/i:CPU<->IO  Up/Down+Enter:Explain  q:Quit]"),
     ]);
-    let header_block = Paragraph::new(vec![line1, line2])
-        .block(Block::default().borders(Borders::ALL).title("Live Telemetry & HighQoS Probe"));
+    let header_block = Paragraph::new(vec![line1, line2]).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Live Telemetry & HighQoS Probe"),
+    );
     f.render_widget(header_block, chunks[0]);
 
     // 2. Gauges + 60s Sparklines
@@ -312,10 +314,34 @@ fn draw_dashboard(
         ])
         .split(chunks[1]);
 
-    render_gauge(f, row2_cols[0], "CPU Total", get_metric_or(s, "cpu_pct", 0.0), 85.0);
-    render_gauge(f, row2_cols[1], "Busiest Core", get_metric_or(s, "core_max_pct", 0.0), 95.0);
-    render_gauge(f, row2_cols[2], "Physical RAM", get_metric_or(s, "ram_pct", 0.0), 90.0);
-    render_gauge(f, row2_cols[3], "Commit Charge", get_metric_or(s, "commit_pct", 0.0), 90.0);
+    render_gauge(
+        f,
+        row2_cols[0],
+        "CPU Total",
+        get_metric_or(s, "cpu_pct", 0.0),
+        85.0,
+    );
+    render_gauge(
+        f,
+        row2_cols[1],
+        "Busiest Core",
+        get_metric_or(s, "core_max_pct", 0.0),
+        95.0,
+    );
+    render_gauge(
+        f,
+        row2_cols[2],
+        "Physical RAM",
+        get_metric_or(s, "ram_pct", 0.0),
+        90.0,
+    );
+    render_gauge(
+        f,
+        row2_cols[3],
+        "Commit Charge",
+        get_metric_or(s, "commit_pct", 0.0),
+        90.0,
+    );
 
     let cpu_slice: Vec<u64> = ui.cpu_hist.iter().copied().collect();
     let com_slice: Vec<u64> = ui.commit_hist.iter().copied().collect();
@@ -367,7 +393,9 @@ fn draw_dashboard(
             };
             let prefix = if idx == ui.selected_event { ">" } else { " " };
             let row_style = if idx == ui.selected_event {
-                Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -393,8 +421,18 @@ fn draw_dashboard(
         ],
     )
     .header(
-        Row::new(vec!["ID", "Time", "Severity", "Kind", "Headline (Enter to Explain)"])
-            .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "ID",
+            "Time",
+            "Severity",
+            "Kind",
+            "Headline (Enter to Explain)",
+        ])
+        .style(
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()
@@ -422,7 +460,10 @@ fn draw_dashboard(
 
 fn format_daemon_badges(daemon_state: Option<&Value>) -> (String, String) {
     let Some(st) = daemon_state else {
-        return ("UI ping: daemon offline".to_string(), "ML: waiting".to_string());
+        return (
+            "UI ping: daemon offline".to_string(),
+            "ML: waiting".to_string(),
+        );
     };
     let alive = !st["stopped"].as_bool().unwrap_or(false)
         && (unix_now() - st["updated_at"].as_f64().unwrap_or(0.0)).abs() < 60.0;
@@ -486,8 +527,18 @@ fn render_cpu_table(f: &mut ratatui::Frame<'_>, area: Rect, top_cpu: &[Value]) {
         ],
     )
     .header(
-        Row::new(vec!["Process [Script / Service]", "PID", "Cores", "CPU%", "Priv MB"])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "Process [Script / Service]",
+            "PID",
+            "Cores",
+            "CPU%",
+            "Priv MB",
+        ])
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()
@@ -527,8 +578,18 @@ fn render_memory_table(f: &mut ratatui::Frame<'_>, area: Rect, top_mem: &[Value]
         ],
     )
     .header(
-        Row::new(vec!["Process [Script / Service]", "Private", "WorkSet", "Cnt", "Handles"])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "Process [Script / Service]",
+            "Private",
+            "WorkSet",
+            "Cnt",
+            "Handles",
+        ])
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()
@@ -545,9 +606,18 @@ fn render_io_table(f: &mut ratatui::Frame<'_>, area: Rect, top_io: &[Value]) {
             Row::new(vec![
                 Cell::from(p["name"].as_str().unwrap_or("?").to_string()),
                 Cell::from(p["pid"].as_u64().unwrap_or(0).to_string()),
-                Cell::from(format!("{:.2} MB/s", p["read_mb_s"].as_f64().unwrap_or(0.0))),
-                Cell::from(format!("{:.2} MB/s", p["write_mb_s"].as_f64().unwrap_or(0.0))),
-                Cell::from(format!("{:.2} MB/s", p["other_mb_s"].as_f64().unwrap_or(0.0))),
+                Cell::from(format!(
+                    "{:.2} MB/s",
+                    p["read_mb_s"].as_f64().unwrap_or(0.0)
+                )),
+                Cell::from(format!(
+                    "{:.2} MB/s",
+                    p["write_mb_s"].as_f64().unwrap_or(0.0)
+                )),
+                Cell::from(format!(
+                    "{:.2} MB/s",
+                    p["other_mb_s"].as_f64().unwrap_or(0.0)
+                )),
             ])
         })
         .collect();
@@ -562,8 +632,18 @@ fn render_io_table(f: &mut ratatui::Frame<'_>, area: Rect, top_io: &[Value]) {
         ],
     )
     .header(
-        Row::new(vec!["Process [Script / Service]", "PID", "Read", "Write", "Net/Other"])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "Process [Script / Service]",
+            "PID",
+            "Read",
+            "Write",
+            "Net/Other",
+        ])
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()
@@ -617,8 +697,11 @@ fn render_faults_table(
         ],
     )
     .header(
-        Row::new(vec!["Process", "PID", "Faults/s", "Private", "Handles"])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Row::new(vec!["Process", "PID", "Faults/s", "Private", "Handles"]).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()

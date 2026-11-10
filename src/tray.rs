@@ -1,6 +1,6 @@
 //! Lightweight native Win32 System Tray Icon (`Shell_NotifyIconW`) for `resmon run --tray`.
 
-#![allow(non_snake_case, non_camel_case_types)]
+#![allow(non_snake_case, non_camel_case_types, clippy::upper_case_acronyms)]
 
 use crate::sampler::mono_now;
 use crate::winapi::{BOOL, DWORD, HANDLE, HWND};
@@ -155,7 +155,7 @@ extern "system" {
 unsafe fn load_app_icon() -> HANDLE {
     let hmod = GetModuleHandleW(null());
     if !hmod.is_null() {
-        let icon = LoadIconW(hmod, 1usize as *const u16);
+        let icon = LoadIconW(hmod, std::ptr::without_provenance::<u16>(1));
         if !icon.is_null() {
             return icon;
         }
@@ -535,7 +535,12 @@ fn tray_thread_main(
             if let Ok(mut q) = PENDING_BALLOONS.lock() {
                 if let Some(balloon) = q.pop_front() {
                     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
-                    apply_balloon_fields(&mut nid, &balloon.title, &balloon.body, &balloon.severity);
+                    apply_balloon_fields(
+                        &mut nid,
+                        &balloon.title,
+                        &balloon.body,
+                        &balloon.severity,
+                    );
                     let _ = Shell_NotifyIconW(NIM_MODIFY, &mut nid);
                     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
                 }

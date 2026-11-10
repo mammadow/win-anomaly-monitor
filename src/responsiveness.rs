@@ -390,7 +390,8 @@ impl ResponsivenessProbe {
         if let Some(sched) = self.tracker.check_wakeup(max_late, now) {
             stalls.push(sched);
         }
-        self.tracker.step(&stalls, now, Some(winapi::sleep_clocks()));
+        self.tracker
+            .step(&stalls, now, Some(winapi::sleep_clocks()));
         self.tracker.drain()
     }
 }

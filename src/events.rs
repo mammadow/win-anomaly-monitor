@@ -111,17 +111,10 @@ pub trait EventSink {
         details: Option<Value>,
     );
 
-    fn point(
-        &mut self,
-        kind: &str,
-        severity: &str,
-        title: &str,
-        ts: f64,
-        details: Value,
-    ) -> Event;
+    fn point(&mut self, kind: &str, severity: &str, title: &str, ts: f64, details: Value) -> Event;
 }
 
-/// Rate-limited Windows toast notifier via PowerShell WinRT `ToastNotificationManager`.
+/// Rate-limited Windows balloon/toast notifier via native Win32 `Shell_NotifyIconW` (`NIF_INFO`).
 pub struct Notifier {
     pub enabled: bool,
     pub min_rank: i32,
@@ -185,6 +178,7 @@ impl EventManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn open_with_storage(
         &mut self,
         storage: &mut Storage,
@@ -214,6 +208,7 @@ impl EventManager {
         ev
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_with_storage(
         &mut self,
         storage: &mut Storage,
@@ -395,14 +390,7 @@ impl<'a> EventSink for LiveEventSink<'a> {
             .close_with_storage(self.storage, ev, ts, title, severity, details);
     }
 
-    fn point(
-        &mut self,
-        kind: &str,
-        severity: &str,
-        title: &str,
-        ts: f64,
-        details: Value,
-    ) -> Event {
+    fn point(&mut self, kind: &str, severity: &str, title: &str, ts: f64, details: Value) -> Event {
         self.events
             .point_with_storage(self.storage, kind, severity, title, ts, details)
     }
@@ -492,14 +480,7 @@ impl EventSink for EventManager {
         self.open_events.remove(&ev.id);
     }
 
-    fn point(
-        &mut self,
-        kind: &str,
-        severity: &str,
-        title: &str,
-        ts: f64,
-        details: Value,
-    ) -> Event {
+    fn point(&mut self, kind: &str, severity: &str, title: &str, ts: f64, details: Value) -> Event {
         let mut ev = self.open(kind, severity, title, ts, details, true);
         ev.is_open = false;
         self.open_events.remove(&ev.id);

@@ -7,7 +7,7 @@
 [![CI](https://github.com/mammadow/win-anomaly-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/mammadow/win-anomaly-monitor/actions/workflows/ci.yml)
 [![Rust 2021](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6.svg)](https://www.microsoft.com/windows)
-[![Overhead](https://img.shields.io/badge/Footprint-~4%20MB%20RAM%20%7C%20%3C0.1%25%20CPU-brightgreen.svg)]()
+[![Overhead](https://img.shields.io/badge/Footprint-~50%20MB%20RAM%20%7C%20%3C0.1%25%20CPU-brightgreen.svg)]()
 [![Storage](https://img.shields.io/badge/storage-SQLite%20WAL%20(bundled)-informational.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -117,6 +117,7 @@ cargo build --release
 
 ```text
 ├── Cargo.toml                 # Pure Rust v4.0 package manifest
+├── build.rs                   # PE version info, DPI-aware manifest, and .ico resource embedder
 ├── config.example.toml        # Documented configuration template
 ├── src/
 │   ├── main.rs                # Console CLI entry point (`resmon.exe`)
@@ -130,7 +131,7 @@ cargo build --release
 │   ├── detector.rs            # Rayon parallel LOF-style kNN anomaly model & background Trainer
 │   ├── rules.rs               # All 9 detectors, recurrence coalescing, OLS leak regression
 │   ├── storage.rs             # Bundled SQLite WAL storage (schema v3 compatible)
-│   ├── events.rs              # Event lifecycle, JSONL writer, WinRT Toast notifier
+│   ├── events.rs              # Event lifecycle, JSONL writer, native Win32 NIF_INFO notifier
 │   ├── diagnostics.rs         # Forensic RCA engine, NL Q&A, health audit, LLM client
 │   ├── replay.rs              # Historical replay & sensitivity grid tuning
 │   ├── tui.rs                 # Interactive `resmon top` dashboard (ratatui + crossterm)
@@ -140,6 +141,8 @@ cargo build --release
 │   └── config.rs              # TOML configuration loader (v3 & v4 compatible)
 ├── tests/
 │   └── integration_tests.rs   # Comprehensive Rust integration test suite
+├── scripts/
+│   └── sign.ps1               # Local SHA-256 Authenticode code-signing helper
 └── legacy/                    # Preserved Python v3 implementation & pytest suite
     ├── monitor.py
     ├── resmon/

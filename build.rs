@@ -40,10 +40,16 @@ fn main() {
             println!("cargo:rustc-link-arg-bins={}", link_path.display());
         }
         Ok(s) => {
-            println!("cargo:warning=rc.exe exited with {}; skipping PE resources", s);
+            println!(
+                "cargo:warning=rc.exe exited with {}; skipping PE resources",
+                s
+            );
         }
         Err(e) => {
-            println!("cargo:warning=failed to run rc.exe ({}); skipping PE resources", e);
+            println!(
+                "cargo:warning=failed to run rc.exe ({}); skipping PE resources",
+                e
+            );
         }
     }
 }
@@ -96,8 +102,11 @@ fn to_space_safe_path(path: &Path) -> PathBuf {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
         #[link(name = "kernel32")]
         extern "system" {
-            fn GetShortPathNameW(lpszLongPath: *const u16, lpszShortPath: *mut u16, cchBuffer: u32)
-                -> u32;
+            fn GetShortPathNameW(
+                lpszLongPath: *const u16,
+                lpszShortPath: *mut u16,
+                cchBuffer: u32,
+            ) -> u32;
         }
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         let mut buf = vec![0u16; 1024];
@@ -190,7 +199,7 @@ fn generate_resmon_ico() -> Vec<u8> {
     out.extend_from_slice(&0u16.to_le_bytes()); // reserved
     out.extend_from_slice(&1u16.to_le_bytes()); // type = ICO
     out.extend_from_slice(&1u16.to_le_bytes()); // count = 1
-    // ICONDIRENTRY
+                                                // ICONDIRENTRY
     out.push(W as u8);
     out.push(H as u8);
     out.push(0); // color count
@@ -199,7 +208,7 @@ fn generate_resmon_ico() -> Vec<u8> {
     out.extend_from_slice(&32u16.to_le_bytes()); // bpp
     out.extend_from_slice(&(dib_size as u32).to_le_bytes());
     out.extend_from_slice(&22u32.to_le_bytes()); // offset
-    // BITMAPINFOHEADER
+                                                 // BITMAPINFOHEADER
     out.extend_from_slice(&40u32.to_le_bytes());
     out.extend_from_slice(&(W as i32).to_le_bytes());
     out.extend_from_slice(&((H * 2) as i32).to_le_bytes()); // height * 2 for XOR + AND masks

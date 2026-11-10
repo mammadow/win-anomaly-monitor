@@ -17,15 +17,23 @@ jobs:
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Cargo registry and target
         uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy lints
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Build release binary
         run: cargo build --release --locked
 
       - name: Run Rust test suite
-        run: cargo test --all-targets -- --nocapture
+        run: cargo test --all-targets --locked -- --nocapture
 
   legacy-python-test:
     name: Legacy Python v3 (${{ matrix.python-version }} on windows-latest)

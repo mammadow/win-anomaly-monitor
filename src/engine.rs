@@ -7,7 +7,7 @@ use crate::events::{EventManager, EventSink, LiveEventSink};
 use crate::features::{get_metric_or, MetricMap, WindowAggregator};
 use crate::processes::ProcessTracker;
 use crate::responsiveness::ResponsivenessProbe;
-use crate::rules::{ summarize_rates, MonitorContext, RuleEngine };
+use crate::rules::{summarize_rates, MonitorContext, RuleEngine};
 use crate::sampler::{mono_now, unix_now, SystemSampler};
 use crate::storage::Storage;
 use crate::tray::TrayController;
@@ -385,9 +385,14 @@ impl Monitor {
         let now = unix_now();
         let open_list: Vec<_> = self.core.events.open_events.values().cloned().collect();
         for mut ev in open_list {
-            self.core
-                .events
-                .close_with_storage(&mut self.core.storage, &mut ev, now, None, None, None);
+            self.core.events.close_with_storage(
+                &mut self.core.storage,
+                &mut ev,
+                now,
+                None,
+                None,
+                None,
+            );
         }
         self.core.storage.flush();
         self.core.trainer.join();

@@ -2,7 +2,7 @@
 //! with Rayon multi-core parallel training and background `Trainer`.
 
 use crate::features::{
-    fmt_feature, get_metric, nanmedian, to_matrix, FEATURE_NAMES, ML_FEATURES, MetricMap,
+    fmt_feature, get_metric, nanmedian, to_matrix, MetricMap, FEATURE_NAMES, ML_FEATURES,
     NUM_FEATURES,
 };
 use rayon::prelude::*;
@@ -490,10 +490,16 @@ impl AnomalyModel {
             let v = x[j] as f32;
             let where_str = if f.unit == "state" {
                 let match_cnt = col.iter().filter(|&&c| (c - v).abs() < 0.25).count();
-                format!("only {} of history", pct_str((match_cnt as f64) / (n as f64)))
+                format!(
+                    "only {} of history",
+                    pct_str((match_cnt as f64) / (n as f64))
+                )
             } else {
                 let pos = col.partition_point(|&c| c < v);
-                format!("higher than {} of history", pct_str((pos as f64) / (n as f64)))
+                format!(
+                    "higher than {} of history",
+                    pct_str((pos as f64) / (n as f64))
+                )
             };
 
             let val_json = if value.is_finite() {
@@ -590,10 +596,7 @@ impl AnomalyModel {
         }
         let meta: ModelMeta =
             serde_json::from_slice(&buf[8..8 + meta_len]).map_err(|e| e.to_string())?;
-        if meta.format != MODEL_FORMAT
-            || meta.features != FEATURE_NAMES
-            || meta.units != UNITS
-        {
+        if meta.format != MODEL_FORMAT || meta.features != FEATURE_NAMES || meta.units != UNITS {
             return Err("saved by an incompatible detector version".to_string());
         }
 
@@ -747,11 +750,7 @@ pub fn fit_model(
         col.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         feature_sorted.push(col);
 
-        let raw_col: Vec<f64> = raw
-            .iter()
-            .map(|r| r[j])
-            .filter(|v| v.is_finite())
-            .collect();
+        let raw_col: Vec<f64> = raw.iter().map(|r| r[j]).filter(|v| v.is_finite()).collect();
         *raw_med = nanmedian(&raw_col);
     }
 

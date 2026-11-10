@@ -57,10 +57,7 @@ fn fmt_top_procs(act: &Value) -> String {
                 .unwrap_or(0.0);
             let name = io0.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             if r + w >= 1.0 {
-                parts.push(format!(
-                    "top I/O: {} ({:.1}R/{:.1}W MB/s)",
-                    name, r, w
-                ));
+                parts.push(format!("top I/O: {} ({:.1}R/{:.1}W MB/s)", name, r, w));
             }
         }
     }
@@ -163,12 +160,7 @@ impl AnomalyEpisodes {
         }
     }
 
-    fn start_episode(
-        &mut self,
-        ctx: &mut impl MonitorContext,
-        w: &MetricMap,
-        now: f64,
-    ) {
+    fn start_episode(&mut self, ctx: &mut impl MonitorContext, w: &MetricMap, now: f64) {
         let ts_start = self
             .streak
             .first()
@@ -200,7 +192,8 @@ impl AnomalyEpisodes {
 
         self.notified = false;
         let (sev, title, details) = self.describe(ctx, ts_start, now);
-        let mut ev = ctx.with_events(|es| es.open("anomaly", &sev, &title, ts_start, details, false));
+        let mut ev =
+            ctx.with_events(|es| es.open("anomaly", &sev, &title, ts_start, details, false));
         ctx.with_events(|es| es.update(&mut ev, now, None, None, None, false));
         self.open_ev = Some(ev);
         self.maybe_notify(ctx, now);
@@ -247,7 +240,7 @@ impl AnomalyEpisodes {
         let mut reasons = Vec::new();
         let mut rarity = 0.0;
         let mut severe = false;
-        if let (Some(model), Some(ref px), Some(ref pw)) =
+        if let (Some(model), Some(ref px), Some(pw)) =
             (ctx.model(), self.peak_x, self.peak_w.as_ref())
         {
             reasons = model.explain(px, pw, 3);
@@ -307,6 +300,7 @@ impl SustainedState {
         self.since = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn open_or_reopen(
         &mut self,
         ctx: &mut impl MonitorContext,
@@ -381,8 +375,15 @@ impl MemoryPressure {
 
             if self.state.open_ev.is_none() && now - since >= sustain {
                 let (sev, title, details) = self.describe(ctx, s, since, now);
-                self.state
-                    .open_or_reopen(ctx, "memory_pressure", &sev, &title, since, now, details);
+                self.state.open_or_reopen(
+                    ctx,
+                    "memory_pressure",
+                    &sev,
+                    &title,
+                    since,
+                    now,
+                    details,
+                );
             } else if self.state.open_ev.is_some() {
                 let (sev, title, details) = self.describe(ctx, s, since, now);
                 if let Some(ref mut ev) = self.state.open_ev {
@@ -437,7 +438,10 @@ impl MemoryPressure {
             "warning"
         };
         let swap_tag = if self.peak_hard_faults_ps >= 50.0 {
-            format!(" [swap thrashing: {:.0} hard faults/s]", self.peak_hard_faults_ps)
+            format!(
+                " [swap thrashing: {:.0} hard faults/s]",
+                self.peak_hard_faults_ps
+            )
         } else {
             String::new()
         };
@@ -700,7 +704,8 @@ impl LowDiskSpace {
             return;
         };
 
-        let is_escalation = self.alerted_severity.as_deref() == Some("warning") && sev == "critical";
+        let is_escalation =
+            self.alerted_severity.as_deref() == Some("warning") && sev == "critical";
         if self.alerted_severity.is_none()
             || is_escalation
             || (now - self.last_alert_at >= Self::COOLDOWN_SEC)
@@ -1105,10 +1110,7 @@ impl UiFreeze {
         if f.source == "compositor" || gpu >= 95.0 {
             reasons.push((
                 "gpu_compositor_stall".to_string(),
-                format!(
-                    "GPU / DWM composition stall (GPU load {:.0}%)",
-                    gpu
-                ),
+                format!("GPU / DWM composition stall (GPU load {:.0}%)", gpu),
             ));
         }
         if cpu >= 85.0 {
@@ -1224,8 +1226,9 @@ impl UiFreeze {
                     "loaded_third_party_drivers": drivers,
                     "note": "High DPC/ISR time comes from a kernel driver (network, storage, GPU, audio) and stalls mouse/audio/UI regardless of free CPU.",
                 });
-                let ev =
-                    ctx.with_events(|es| es.open("dpc_storm", "warning", &title, since, details, true));
+                let ev = ctx.with_events(|es| {
+                    es.open("dpc_storm", "warning", &title, since, details, true)
+                });
                 self.dpc_ev = Some(ev);
             } else if let Some(ref mut ev) = self.dpc_ev {
                 let sev = if dur >= 15.0 || self.dpc_peak >= 35.0 {
@@ -1335,10 +1338,8 @@ impl BackgroundCpu {
 
             let n_h = h.len() as f64;
             let avg_cores: f64 = h.iter().map(|x| x.1).sum::<f64>() / n_h;
-            let fg_share: f64 =
-                h.iter().filter(|x| x.2).count() as f64 / n_h;
-            let busy_share: f64 =
-                h.iter().filter(|x| x.1 >= thr * 0.7).count() as f64 / n_h;
+            let fg_share: f64 = h.iter().filter(|x| x.2).count() as f64 / n_h;
+            let busy_share: f64 = h.iter().filter(|x| x.1 >= thr * 0.7).count() as f64 / n_h;
 
             if fg_share == 0.0 && avg_cores >= thr && busy_share >= 0.8 {
                 let start = h.front().unwrap().0;
@@ -1390,7 +1391,7 @@ impl BackgroundCpu {
         now: f64,
         thr: f64,
     ) {
-        let recent_len = h.len().min(6).max(1);
+        let recent_len = h.len().clamp(1, 6);
         let recent_sum: f64 = h.iter().rev().take(6).map(|x| x.1).sum();
         let recent_fg: usize = h.iter().rev().take(6).filter(|x| x.2).count();
 
@@ -1409,9 +1410,7 @@ impl BackgroundCpu {
                     fmt_duration(now - ev.ts_start)
                 );
                 let details = json!({ "avg_cores": (avg * 100.0).round() / 100.0 });
-                ctx.with_events(|es| {
-                    es.update(ev, now, Some(&title), None, Some(details), false)
-                });
+                ctx.with_events(|es| es.update(ev, now, Some(&title), None, Some(details), false));
             }
         }
     }
@@ -1625,6 +1624,7 @@ impl Leaks {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn report(
         &mut self,
         ctx: &mut impl MonitorContext,
@@ -1724,10 +1724,7 @@ impl Leaks {
         }
 
         let mut why = if current >= ctx.cfg().handle_absolute_limit {
-            format!(
-                "holds {:.0} handles (typical apps use < 10,000)",
-                current
-            )
+            format!("holds {:.0} handles (typical apps use < 10,000)", current)
         } else if rate.is_some() {
             format!("handle count growing steadily, now {:.0}", current)
         } else {
@@ -1869,10 +1866,7 @@ pub fn summarize_rates(s: &MetricMap) -> String {
 }
 
 /// Helper to evaluate a `MetricMap` window with `AnomalyModel` if present.
-pub fn score_window(
-    model: Option<&AnomalyModel>,
-    w: &mut MetricMap,
-) -> [f64; NUM_FEATURES] {
+pub fn score_window(model: Option<&AnomalyModel>, w: &mut MetricMap) -> [f64; NUM_FEATURES] {
     let raw_arr = map_to_feature_array(w);
     let x = crate::features::to_matrix_row(&raw_arr);
     if let Some(m) = model {

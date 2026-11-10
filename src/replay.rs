@@ -3,9 +3,7 @@
 use crate::config::MonitorConfig;
 use crate::detector::{fit_model, AnomalyModel, K_NEIGHBOURS};
 use crate::events::{merge_details, severity_rank, Event, EventSink};
-use crate::features::{
-    get_metric_or, map_to_feature_array, to_matrix, MetricMap, NUM_FEATURES,
-};
+use crate::features::{get_metric_or, map_to_feature_array, to_matrix, MetricMap, NUM_FEATURES};
 use crate::rules::{AnomalyEpisodes, MonitorContext};
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -97,14 +95,7 @@ impl EventSink for RecordingEvents {
         }
     }
 
-    fn point(
-        &mut self,
-        kind: &str,
-        severity: &str,
-        title: &str,
-        ts: f64,
-        details: Value,
-    ) -> Event {
+    fn point(&mut self, kind: &str, severity: &str, title: &str, ts: f64, details: Value) -> Event {
         let mut ev = self.open(kind, severity, title, ts, details, false);
         ev.is_open = false;
         if let Some(slot) = self.events.iter_mut().find(|e| e.id == ev.id) {
@@ -201,7 +192,10 @@ pub fn replay(windows: &[MetricMap], cfg: &MonitorConfig, seed: u64) -> ReplayRe
 
     let mut mon = ReplayMonitor::new(cfg.clone());
     let mut episodes = AnomalyEpisodes::new();
-    let ts: Vec<f64> = windows.iter().map(|w| get_metric_or(w, "ts", 0.0)).collect();
+    let ts: Vec<f64> = windows
+        .iter()
+        .map(|w| get_metric_or(w, "ts", 0.0))
+        .collect();
     let raw: Vec<[f64; NUM_FEATURES]> = windows.iter().map(map_to_feature_array).collect();
     let x_mat = to_matrix(&raw);
 
@@ -347,7 +341,10 @@ pub fn tune_grid(
         return rows;
     }
 
-    let ts: Vec<f64> = windows.iter().map(|w| get_metric_or(w, "ts", 0.0)).collect();
+    let ts: Vec<f64> = windows
+        .iter()
+        .map(|w| get_metric_or(w, "ts", 0.0))
+        .collect();
     let raw: Vec<[f64; NUM_FEATURES]> = windows.iter().map(map_to_feature_array).collect();
     let x_mat = to_matrix(&raw);
 

@@ -352,7 +352,7 @@ impl ProcessTracker {
         }
 
         let mut groups: Vec<MemGroup> = by_name.into_values().collect();
-        groups.sort_by(|a, b| b.private_bytes.cmp(&a.private_bytes));
+        groups.sort_by_key(|a| std::cmp::Reverse(a.private_bytes));
         groups
             .into_iter()
             .take(top_n)

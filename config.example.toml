@@ -1,12 +1,12 @@
 # Copy to config.toml and change only what you need; everything else keeps
-# its default (see resmon/config.py for the full list). Restart the monitor
+# its default (see src/config.rs for the full list). Restart the monitor
 # after editing.
 
 # ── ML sensitivity ────────────────────────────────────────────────────
 # How rare a 10-second window must be, compared with your own history, to
 # count as anomalous: 0.001 = rarer than 99.9 % of past windows.
 #   more alerts  ← 0.005 · 0.002 · 0.001 · 0.0005 →  fewer alerts
-# Run `python monitor.py tune` to see what each value would have done on
+# Run `resmon tune` to see what each value would have done on
 # your recorded history before changing it.
 # alert_quantile = 0.001
 
@@ -68,7 +68,7 @@
 # event_retention_days = 180
 
 # ── AI / Conversational Diagnostics ───────────────────────────────────
-# How `monitor.py explain` and `monitor.py ask` generate diagnostic insights.
+# How `resmon explain` and `resmon ask` generate diagnostic insights.
 # Options: "auto" (tries Ollama, then OpenAI API if set, otherwise offline expert engine),
 #          "ollama" (local Ollama server), "openai" (OpenAI-compatible REST API),
 #          "offline" (built-in zero-dependency deterministic diagnostic reasoning engine).

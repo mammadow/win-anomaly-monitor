@@ -84,8 +84,10 @@ fn test_config_validation_and_toml_loading() {
     assert_eq!(cfg.window_sec, 10);
     assert_eq!(cfg.ai_provider, "offline");
 
-    let mut bad_cfg = MonitorConfig::default();
-    bad_cfg.alert_quantile = 0.9;
+    let bad_cfg = MonitorConfig {
+        alert_quantile: 0.9,
+        ..MonitorConfig::default()
+    };
     assert!(bad_cfg.validate().is_err());
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -199,8 +201,10 @@ fn test_knn_detector_catches_incidents_and_persists() {
 
 #[test]
 fn test_rules_recurrence_coalescing_and_leaks() {
-    let mut cfg = MonitorConfig::default();
-    cfg.memory_sustain_sec = 10.0;
+    let cfg = MonitorConfig {
+        memory_sustain_sec: 10.0,
+        ..MonitorConfig::default()
+    };
     let mut mon = ReplayMonitor::new(cfg);
     let mut mp = MemoryPressure::default();
 
@@ -241,12 +245,14 @@ fn test_rules_recurrence_coalescing_and_leaks() {
 
 #[test]
 fn test_other_detectors_and_background_cpu() {
-    let mut cfg = MonitorConfig::default();
-    cfg.gpu_temp_sustain_sec = 5.0;
-    cfg.gpu_battery_wake_sustain_sec = 5.0;
-    cfg.net_upload_sustain_sec = 5.0;
-    cfg.background_cpu_sustain_sec = 20.0;
-    cfg.process_interval_sec = 5.0;
+    let cfg = MonitorConfig {
+        gpu_temp_sustain_sec: 5.0,
+        gpu_battery_wake_sustain_sec: 5.0,
+        net_upload_sustain_sec: 5.0,
+        background_cpu_sustain_sec: 20.0,
+        process_interval_sec: 5.0,
+        ..MonitorConfig::default()
+    };
     let mut mon = ReplayMonitor::new(cfg);
 
     // LowDiskSpace
@@ -416,9 +422,11 @@ fn test_winapi_and_responsiveness_probe_live() {
 #[test]
 fn test_storage_diagnostics_and_cli_commands() {
     let dir = temp_test_dir("storage_diag");
-    let mut cfg = MonitorConfig::default();
-    cfg.data_dir = dir.clone();
-    cfg.ai_provider = "offline".to_string();
+    let cfg = MonitorConfig {
+        data_dir: dir.clone(),
+        ai_provider: "offline".to_string(),
+        ..MonitorConfig::default()
+    };
 
     let mut st = Storage::new(&cfg.db_path()).unwrap();
     let now = unix_now();
@@ -489,9 +497,11 @@ fn test_storage_diagnostics_and_cli_commands() {
 
 #[test]
 fn test_replay_and_tune_grid() {
-    let mut cfg = MonitorConfig::default();
-    cfg.min_training_hours = 0.05; // 18 windows of 10s
-    cfg.window_sec = 10;
+    let cfg = MonitorConfig {
+        min_training_hours: 0.05, // 18 windows of 10s
+        window_sec: 10,
+        ..MonitorConfig::default()
+    };
 
     let mut windows = Vec::new();
     for i in 0..80 {
@@ -528,9 +538,11 @@ fn test_replay_and_tune_grid() {
 #[test]
 fn test_dual_schema_v3_v4_diagnostics() {
     let dir = temp_test_dir("v3_compat");
-    let mut cfg = MonitorConfig::default();
-    cfg.data_dir = dir.clone();
-    cfg.ai_provider = "offline".to_string();
+    let cfg = MonitorConfig {
+        data_dir: dir.clone(),
+        ai_provider: "offline".to_string(),
+        ..MonitorConfig::default()
+    };
 
     let mut st = Storage::new(&cfg.db_path()).unwrap();
     let now = unix_now();
@@ -589,7 +601,11 @@ fn test_dual_schema_v3_v4_diagnostics() {
 
     let audit = audit_system_health(&st, &cfg, 24.0);
     let rep = audit["report"].as_str().unwrap();
-    assert!(rep.contains("97.4%"), "expected v3 peak commit in report: {}", rep);
+    assert!(
+        rep.contains("97.4%"),
+        "expected v3 peak commit in report: {}",
+        rep
+    );
 
     drop(st);
     let _ = std::fs::remove_dir_all(&dir);
@@ -623,8 +639,10 @@ fn test_native_rust_avx2_ecoqos_nvml_and_throttle_benefits() {
     assert!(asleep.gpu_temp_c.is_nan());
 
     // 4. Verify GpuThermal filters idle thermal flag quirks (<65C) but flags real throttle (>=65C)
-    let mut cfg = MonitorConfig::default();
-    cfg.gpu_temp_sustain_sec = 5.0;
+    let cfg = MonitorConfig {
+        gpu_temp_sustain_sec: 5.0,
+        ..MonitorConfig::default()
+    };
     let mut mon = ReplayMonitor::new(cfg);
     let mut gt = GpuThermal::default();
     let mut cool_quirk = make_sample(100.0, 5.0, 40.0);

@@ -169,16 +169,16 @@ impl SystemSampler {
 
         // 3. Disk Read/Write B/s & system-wide Hard Page Faults/s
         let cur_perf = winapi::system_perf_counters();
-        let (mut disk_read_bps, mut disk_write_bps, hard_faults_ps) = match (self.prev_perf, cur_perf)
-        {
-            (Some(p), Some(c)) => {
-                let dr = c.io_read_bytes.saturating_sub(p.io_read_bytes) as f64 / dt;
-                let dw = c.io_write_bytes.saturating_sub(p.io_write_bytes) as f64 / dt;
-                let hf = c.hard_page_faults.wrapping_sub(p.hard_page_faults) as f64 / dt;
-                (dr, dw, hf.max(0.0))
-            }
-            _ => (0.0, 0.0, 0.0),
-        };
+        let (mut disk_read_bps, mut disk_write_bps, hard_faults_ps) =
+            match (self.prev_perf, cur_perf) {
+                (Some(p), Some(c)) => {
+                    let dr = c.io_read_bytes.saturating_sub(p.io_read_bytes) as f64 / dt;
+                    let dw = c.io_write_bytes.saturating_sub(p.io_write_bytes) as f64 / dt;
+                    let hf = c.hard_page_faults.wrapping_sub(p.hard_page_faults) as f64 / dt;
+                    (dr, dw, hf.max(0.0))
+                }
+                _ => (0.0, 0.0, 0.0),
+            };
         self.prev_perf = cur_perf;
 
         if let Some(ref mut pdh) = self.pdh_disk {

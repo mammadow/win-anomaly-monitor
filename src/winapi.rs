@@ -379,11 +379,7 @@ extern "system" {
 
 #[link(name = "pdh")]
 extern "system" {
-    fn PdhOpenQueryW(
-        szDataSource: *const u16,
-        dwUserData: usize,
-        phQuery: *mut HANDLE,
-    ) -> DWORD;
+    fn PdhOpenQueryW(szDataSource: *const u16, dwUserData: usize, phQuery: *mut HANDLE) -> DWORD;
     fn PdhAddEnglishCounterW(
         hQuery: HANDLE,
         szFullCounterPath: *const u16,
@@ -460,9 +456,12 @@ impl PdhDiskSampler {
             }
             let mut val_r: PDH_FMT_COUNTERVALUE = zeroed();
             let mut val_w: PDH_FMT_COUNTERVALUE = zeroed();
-            let r_ok =
-                PdhGetFormattedCounterValue(self.read_counter, PDH_FMT_DOUBLE, null_mut(), &mut val_r)
-                    == 0;
+            let r_ok = PdhGetFormattedCounterValue(
+                self.read_counter,
+                PDH_FMT_DOUBLE,
+                null_mut(),
+                &mut val_r,
+            ) == 0;
             let w_ok = PdhGetFormattedCounterValue(
                 self.write_counter,
                 PDH_FMT_DOUBLE,
@@ -534,9 +533,7 @@ pub fn iter_processes(buf: &mut Vec<u8>) -> Vec<RawProc> {
     let mut out = Vec::with_capacity(300);
     let mut offset: usize = 0;
     while offset + size_of::<SYSTEM_PROCESS_INFORMATION_RAW>() <= buf.len() {
-        let e = unsafe {
-            &*(buf.as_ptr().add(offset) as *const SYSTEM_PROCESS_INFORMATION_RAW)
-        };
+        let e = unsafe { &*(buf.as_ptr().add(offset) as *const SYSTEM_PROCESS_INFORMATION_RAW) };
         let pid = e.UniqueProcessId as u32;
         if pid != 0 {
             let name = if !e.ImageName.Buffer.is_null() && e.ImageName.Length > 0 {
@@ -711,7 +708,13 @@ fn shorten_token(tok: &str) -> String {
         let prev = parts[parts.len() - 2];
         if matches!(
             last.to_ascii_lowercase().as_str(),
-            "index.js" | "index.ts" | "main.py" | "__init__.py" | "__main__.py" | "server.js" | "cli.js"
+            "index.js"
+                | "index.ts"
+                | "main.py"
+                | "__init__.py"
+                | "__main__.py"
+                | "server.js"
+                | "cli.js"
         ) && prev != "."
         {
             format!("{}/{}", prev, last)
@@ -965,13 +968,7 @@ pub fn system_drive_free_gb() -> f64 {
     let mut total: u64 = 0;
     let mut total_free: u64 = 0;
     unsafe {
-        if GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut free_avail,
-            &mut total,
-            &mut total_free,
-        ) != 0
-        {
+        if GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_avail, &mut total, &mut total_free) != 0 {
             (free_avail as f64) / ((1u64 << 30) as f64)
         } else {
             f64::NAN
@@ -1150,7 +1147,7 @@ pub fn real_window_from_ghost(hwnd: usize) -> Option<usize> {
         if h.is_null() {
             return None;
         }
-        let addr = GetProcAddress(h, b"HungWindowFromGhostWindow\0".as_ptr());
+        let addr = GetProcAddress(h, c"HungWindowFromGhostWindow".as_ptr().cast::<u8>());
         if addr.is_null() {
             None
         } else {
@@ -1389,8 +1386,10 @@ pub struct NvmlClient {
     fn_get_mem: unsafe extern "C" fn(NvmlDevice, *mut NvmlMemory) -> i32,
     fn_get_clock: unsafe extern "C" fn(NvmlDevice, u32, *mut u32) -> i32,
     fn_get_throttle: Option<unsafe extern "C" fn(NvmlDevice, *mut u64) -> i32>,
-    fn_get_comp_procs: Option<unsafe extern "C" fn(NvmlDevice, *mut u32, *mut NvmlProcessInfo) -> i32>,
-    fn_get_gfx_procs: Option<unsafe extern "C" fn(NvmlDevice, *mut u32, *mut NvmlProcessInfo) -> i32>,
+    fn_get_comp_procs:
+        Option<unsafe extern "C" fn(NvmlDevice, *mut u32, *mut NvmlProcessInfo) -> i32>,
+    fn_get_gfx_procs:
+        Option<unsafe extern "C" fn(NvmlDevice, *mut u32, *mut NvmlProcessInfo) -> i32>,
 }
 
 unsafe impl Send for NvmlClient {}
@@ -1438,8 +1437,8 @@ impl NvmlClient {
         unsafe {
             let lib = libloading::Library::new("nvml.dll")
                 .or_else(|_| {
-                    let sys32 = std::env::var("SystemRoot")
-                        .unwrap_or_else(|_| "C:\\Windows".to_string());
+                    let sys32 =
+                        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
                     libloading::Library::new(format!("{}\\System32\\nvml.dll", sys32))
                 })
                 .ok()?;
@@ -1452,8 +1451,7 @@ impl NvmlClient {
                 return None;
             }
 
-            let fn_shutdown: unsafe extern "C" fn() -> i32 =
-                *lib.get(b"nvmlShutdown\0").ok()?;
+            let fn_shutdown: unsafe extern "C" fn() -> i32 = *lib.get(b"nvmlShutdown\0").ok()?;
             let fn_get_handle: unsafe extern "C" fn(u32, *mut NvmlDevice) -> i32 = *lib
                 .get(b"nvmlDeviceGetHandleByIndex_v2\0")
                 .or_else(|_| lib.get(b"nvmlDeviceGetHandleByIndex\0"))
@@ -1553,11 +1551,12 @@ impl NvmlClient {
             } else {
                 f64::NAN
             };
-            let power_w = if raw_power_w.is_finite() && (0.0..=self.max_power_w).contains(&raw_power_w) {
-                raw_power_w
-            } else {
-                f64::NAN
-            };
+            let power_w =
+                if raw_power_w.is_finite() && (0.0..=self.max_power_w).contains(&raw_power_w) {
+                    raw_power_w
+                } else {
+                    f64::NAN
+                };
             let mut temp: u32 = 0;
             let raw_temp_c = if (self.fn_get_temp)(self.device, 0, &mut temp) == 0 {
                 temp as f64

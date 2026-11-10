@@ -415,7 +415,10 @@ pub fn load_config(path: Option<&Path>) -> Result<MonitorConfig, String> {
     } else {
         let cwd_cfg = PathBuf::from("config.toml");
         let cwd_data = PathBuf::from("data");
-        if cwd_cfg.exists() || cwd_data.join("metrics.db").exists() || cwd_data.join("state.json").exists() {
+        if cwd_cfg.exists()
+            || cwd_data.join("metrics.db").exists()
+            || cwd_data.join("state.json").exists()
+        {
             (cwd_cfg, None)
         } else if let Some(repo_dir) = option_env!("CARGO_MANIFEST_DIR").map(PathBuf::from) {
             let repo_cfg = repo_dir.join("config.toml");
@@ -443,7 +446,11 @@ pub fn load_config(path: Option<&Path>) -> Result<MonitorConfig, String> {
         let known = known_fields();
         for key in flat.keys() {
             if !known.contains(key.as_str()) {
-                eprintln!("WARN: Unknown setting in {}: {:?}", target_config.display(), key);
+                eprintln!(
+                    "WARN: Unknown setting in {}: {:?}",
+                    target_config.display(),
+                    key
+                );
             }
         }
         let default_fallback_data = cfg.data_dir.clone();
