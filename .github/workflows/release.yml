@@ -105,7 +105,8 @@ jobs:
 
           $oldEap = $ErrorActionPreference
           $ErrorActionPreference = 'Continue'
-          $tagNotes = (git tag -l --format="%(contents)" $tag 2>$null | Out-String).Trim()
+          $tagNotes = (git tag -l --format="%(contents)" $tag 2>$null | Out-String)
+          $tagNotes = ($tagNotes -replace '(?s)\r?\n?-----BEGIN (?:SSH|PGP) SIGNATURE-----.*?-----END (?:SSH|PGP) SIGNATURE-----\r?\n?', '').Trim()
           gh release view $tag *> $null
           $exists = ($LASTEXITCODE -eq 0)
           $ErrorActionPreference = $oldEap
