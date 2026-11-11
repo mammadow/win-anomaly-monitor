@@ -52,8 +52,11 @@
 # handle_growth_min_count = 10000  # steady handle growth matters only above this
 
 # Processes you never want blamed (case-insensitive executable names).
-# ignore_processes = ["MsMpEng.exe", "SearchIndexer.exe"]
-# Disambiguate python/node/pwsh command lines (set false on strict AV hosts)
+# ignore_processes = ["MsMpEng.exe", "SearchIndexer.exe", "bdservicehost.exe"]
+
+# Low-AV-heuristic options (only needed on strict AV hosts without exclusions):
+#   cmdline_attribution = false   # skips NtQueryInformationProcess(60) script lookups
+#   ui_probe_enabled = false      # skips SendMessageTimeoutW foreground/taskbar pings
 # cmdline_attribution = true
 
 # ── Notifications ─────────────────────────────────────────────────────

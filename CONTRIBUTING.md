@@ -32,10 +32,12 @@ python -m pytest tests -v -ra
 
 ### 2. Optional local code signing
 
-For local Windows builds stored in startup shortcuts or evaluated by endpoint security, `scripts/sign.ps1` creates (if needed) a `CN=resmon Local Publisher` code-signing certificate in `Cert:\CurrentUser\My` and SHA-256 Authenticode-signs `target\release\resmon.exe` and `target\release\resmonw.exe`:
+For local Windows builds stored in startup tasks/shortcuts or evaluated by endpoint security, `scripts/sign.ps1` creates (if needed) a `CN=resmon Local Publisher` code-signing certificate in `Cert:\CurrentUser\My`, exports the public `.cer` to `target\release\resmon-local-pub.cer`, and signs `target\release\resmon.exe` and `target\release\resmonw.exe` with SHA-256 Authenticode + RFC 3161 timestamping:
 
 ```powershell
 .\scripts\sign.ps1
+# Or also import the public cert into CurrentUser\Root & TrustedPublisher (authenticates locally as Valid):
+.\scripts\sign.ps1 -TrustLocal
 ```
 
 ## Architecture & Coding Guidelines
