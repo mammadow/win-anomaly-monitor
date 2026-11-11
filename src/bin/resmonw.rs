@@ -24,6 +24,7 @@ fn log_startup_error(msg: &str) {
 }
 
 fn main() {
+    resmon::winapi::harden_dll_search_order();
     let mut args = CliArgs::parse();
     if args.command.is_none() {
         args.command = Some(Commands::Run { tray: true });

@@ -77,6 +77,9 @@ pub enum Commands {
         /// Output machine-readable JSON
         #[arg(long = "json")]
         json_out: bool,
+        /// Wait for Enter before exiting (used when opened from the system tray)
+        #[arg(long = "wait", hide = true)]
+        wait: bool,
     },
     /// Ask a natural-language diagnostic question about recent system behavior
     Ask {
@@ -143,15 +146,24 @@ pub fn run_cli(args: CliArgs) -> i32 {
             offline,
             prompt,
             json_out,
-        } => cmd_explain(
-            &cfg,
-            &target,
-            kind.as_deref(),
-            question.as_deref(),
-            offline,
-            prompt,
-            json_out,
-        ),
+            wait,
+        } => {
+            let code = cmd_explain(
+                &cfg,
+                &target,
+                kind.as_deref(),
+                question.as_deref(),
+                offline,
+                prompt,
+                json_out,
+            );
+            if wait {
+                println!("\nPress Enter to close...");
+                let _ = io::stdout().flush();
+                let _ = io::stdin().read_line(&mut String::new());
+            }
+            code
+        }
         Commands::Ask {
             question,
             hours,

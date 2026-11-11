@@ -334,7 +334,7 @@ unsafe fn show_context_menu(hwnd: HWND) {
 fn handle_menu_command(cmd: usize) {
     match cmd {
         CMD_OPEN_TOP => spawn_cli_window(&["top"]),
-        CMD_EXPLAIN_LATEST => spawn_cli_window(&["explain"]),
+        CMD_EXPLAIN_LATEST => spawn_cli_window(&["explain", "--wait"]),
         CMD_PAUSE_1H => {
             if let Ok(guard) = TRAY_STATE.lock() {
                 if let Some(ref st) = *guard {
@@ -370,29 +370,10 @@ fn spawn_cli_window(args: &[&str]) {
     let Some(exe) = resolve_cli_exe() else {
         return;
     };
-    let is_interactive = args.first().copied() == Some("top");
-    if is_interactive {
-        let _ = std::process::Command::new(&exe)
-            .args(args)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn();
-    } else {
-        let quoted_args: Vec<String> = args
-            .iter()
-            .map(|a| {
-                if a.contains(' ') {
-                    format!("\"{}\"", a)
-                } else {
-                    (*a).to_string()
-                }
-            })
-            .collect();
-        let cmdline = format!("/d /k \"\"{}\" {}\"", exe.display(), quoted_args.join(" "));
-        let _ = std::process::Command::new("cmd.exe")
-            .raw_arg(&cmdline)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn();
-    }
+    let _ = std::process::Command::new(&exe)
+        .args(args)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn();
 }
 
 struct TrayBalloon {

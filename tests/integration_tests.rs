@@ -682,4 +682,10 @@ fn test_native_rust_avx2_ecoqos_nvml_and_throttle_benefits() {
     let summary = summarize_rates(&summary_sample);
     assert!(summary.contains("1.95 GHz [cap 1.80]"), "{}", summary);
     assert!(summary.contains("battery 74% (-18.5 W)"), "{}", summary);
+
+    // 7. Verify DLL search-order hardening & System32-strict NVML initialization
+    assert!(winapi::harden_dll_search_order());
+    assert!(winapi::system_drive_free_gb().is_finite());
+    // Must not fail or panic if GPU is asleep/present/absent after System32 hardening
+    let _ = winapi::NvmlClient::try_new();
 }

@@ -334,6 +334,8 @@ extern "system" {
         HandlerRoutine: Option<unsafe extern "system" fn(DWORD) -> BOOL>,
         Add: BOOL,
     ) -> BOOL;
+    fn GetSystemDirectoryW(lpBuffer: *mut u16, uSize: u32) -> u32;
+    fn SetDefaultDllDirectories(DirectoryFlags: DWORD) -> BOOL;
 }
 
 #[link(name = "psapi")]
@@ -998,11 +1000,41 @@ pub fn network_octets() -> Option<(u64, u64)> {
     }
 }
 
+/// Lock default Windows DLL search order for bare `LoadLibrary` / delay-load lookups
+/// strictly to `%SystemRoot%\System32` (`LOAD_LIBRARY_SEARCH_SYSTEM32`), preventing
+/// application-directory or `%PATH%` DLL planting.
+pub fn harden_dll_search_order() -> bool {
+    const LOAD_LIBRARY_SEARCH_SYSTEM32: DWORD = 0x0000_0800;
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) != 0 }
+}
+
+/// Resolve the true OS System32 path via Win32 `GetSystemDirectoryW` without trusting env vars.
+fn system32_dir() -> Option<std::path::PathBuf> {
+    let mut buf = [0u16; 260];
+    let n = unsafe { GetSystemDirectoryW(buf.as_mut_ptr(), buf.len() as u32) };
+    if n > 0 && (n as usize) < buf.len() {
+        return Some(std::path::PathBuf::from(OsString::from_wide(
+            &buf[..n as usize],
+        )));
+    }
+    None
+}
+
 /// Free disk space in GiB on the system drive (`C:\`).
 pub fn system_drive_free_gb() -> f64 {
-    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
-    let path_str = format!("{}\\\0", drive);
-    let wide: Vec<u16> = path_str.encode_utf16().collect();
+    let root = match system32_dir() {
+        Some(p) => {
+            let s = p.to_string_lossy();
+            let bytes = s.as_bytes();
+            if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+                format!("{}\\\0", &s[..2])
+            } else {
+                "C:\\\0".to_string()
+            }
+        }
+        None => "C:\\\0".to_string(),
+    };
+    let wide: Vec<u16> = root.encode_utf16().collect();
     let mut free_avail: u64 = 0;
     let mut total: u64 = 0;
     let mut total_free: u64 = 0;
@@ -1555,14 +1587,9 @@ impl NvmlTelemetry {
 
 impl NvmlClient {
     pub fn try_new() -> Option<Self> {
+        let sys32_nvml = system32_dir()?.join("nvml.dll");
         unsafe {
-            let lib = libloading::Library::new("nvml.dll")
-                .or_else(|_| {
-                    let sys32 =
-                        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-                    libloading::Library::new(format!("{}\\System32\\nvml.dll", sys32))
-                })
-                .ok()?;
+            let lib = libloading::Library::new(&sys32_nvml).ok()?;
 
             let fn_init: unsafe extern "C" fn() -> i32 = *lib
                 .get(b"nvmlInit_v2\0")
