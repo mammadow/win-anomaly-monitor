@@ -19,9 +19,9 @@ Open **Bitdefender Total Security → Protection → Antivirus → Open → Sett
 
 | Path | Who Needs It | Why |
 |---|---|---|
-| `C:\projects\resource monitor\` | **Everyone running from repo** | Protects `target\release\resmonw.exe`, `resmon.exe`, `metrics.db`, `state.json`, and `events.jsonl` |
-| `C:\Users\<USER>\.cargo\` | **Only if building/testing locally** | Prevents quarantine of temporary `cargo test` / `cargo build` binaries |
-| `C:\Users\<USER>\.rustup\` | **Only if building/testing locally** | Prevents interference with `rustc.exe` / linker toolchains |
+| `<repo-dir>\` *(e.g. your cloned repo folder)* | **Everyone running from repo** | Protects `target\release\resmonw.exe`, `resmon.exe`, `metrics.db`, `state.json`, and `events.jsonl` |
+| `%USERPROFILE%\.cargo\` | **Only if building/testing locally** | Prevents quarantine of temporary `cargo test` / `cargo build` binaries |
+| `%USERPROFILE%\.rustup\` | **Only if building/testing locally** | Prevents interference with `rustc.exe` / linker toolchains |
 | `C:\Program Files\resmon\` | **Only if installed there for Admin mode** | Protects deployed `.exe` binaries outside the repo |
 
 Also check:
