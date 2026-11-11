@@ -43,7 +43,21 @@
 
 ## 🚀 Quick Start
 
-### Build & Run (Rust v4.0)
+### Download Prebuilt Release (Windows 11 x64)
+
+Download `resmon-v4.0.0-windows-x86_64.zip` (or standalone `resmon.exe` / `resmonw.exe` + `SHA256SUMS.txt`) from [GitHub Releases](https://github.com/mammadow/win-anomaly-monitor/releases/latest), extract it into a folder, and launch:
+
+```powershell
+# Start windowless background monitor with system tray icon (suitable for shell:startup)
+.\resmonw.exe run --tray
+
+# Check live status, launch interactive dashboard, or inspect events
+.\resmon.exe status
+.\resmon.exe top
+.\resmon.exe diagnose
+```
+
+### Build from Source (Rust v4.0)
 
 ```powershell
 # Build optimized release binaries (`target\release\resmon.exe` & `resmonw.exe`)
