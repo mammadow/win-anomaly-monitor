@@ -204,8 +204,9 @@ impl SystemSampler {
             self.disk_free_at = now;
         }
 
-        // 6. Power & User activity
+        // 6. Power, battery & CPU clock telemetry
         let on_ac = winapi::on_ac_power();
+        let pwr = winapi::power_telemetry();
         let user_active = if winapi::user_idle_seconds() < self.user_idle_after_sec {
             1.0
         } else {
@@ -231,6 +232,17 @@ impl SystemSampler {
         map.insert("hard_faults_ps".to_string(), hard_faults_ps);
         map.insert("disk_free_gb".to_string(), self.disk_free_gb);
         map.insert("on_ac".to_string(), on_ac);
+        if pwr.battery_pct.is_finite() {
+            map.insert("battery_pct".to_string(), pwr.battery_pct);
+        }
+        if pwr.battery_rate_w.is_finite() {
+            map.insert("battery_rate_w".to_string(), pwr.battery_rate_w);
+        }
+        if pwr.cpu_mhz.is_finite() {
+            map.insert("cpu_mhz".to_string(), pwr.cpu_mhz);
+            map.insert("cpu_max_mhz".to_string(), pwr.cpu_max_mhz);
+            map.insert("cpu_mhz_limit".to_string(), pwr.cpu_mhz_limit);
+        }
         map.insert("user_active".to_string(), user_active);
         map.insert("gpu_awake".to_string(), gpu.gpu_awake);
         map.insert("gpu_util_pct".to_string(), gpu.gpu_util_pct);

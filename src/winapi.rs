@@ -200,6 +200,34 @@ struct ENUM_SERVICE_STATUS_PROCESSW {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct SYSTEM_BATTERY_STATE {
+    AcOnLine: u8,
+    BatteryPresent: u8,
+    Charging: u8,
+    Discharging: u8,
+    Spare1: [u8; 3],
+    Tag: u8,
+    MaxCapacity: u32,
+    RemainingCapacity: u32,
+    Rate: i32,
+    EstimatedTime: u32,
+    DefaultAlert1: u32,
+    DefaultAlert2: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct PROCESSOR_POWER_INFORMATION {
+    Number: u32,
+    MaxMhz: u32,
+    CurrentMhz: u32,
+    MhzLimit: u32,
+    MaxIdleState: u32,
+    CurrentIdleState: u32,
+}
+
+#[repr(C)]
 #[derive(Copy, Clone)]
 struct MIB_IF_ROW2 {
     InterfaceLuid: u64,
@@ -322,6 +350,17 @@ extern "system" {
         lpFilename: *mut u16,
         nSize: DWORD,
     ) -> DWORD;
+}
+
+#[link(name = "powrprof")]
+extern "system" {
+    fn CallNtPowerInformation(
+        InformationLevel: i32,
+        InputBuffer: *mut core::ffi::c_void,
+        InputBufferLength: u32,
+        OutputBuffer: *mut core::ffi::c_void,
+        OutputBufferLength: u32,
+    ) -> NTSTATUS;
 }
 
 #[link(name = "user32")]
@@ -991,6 +1030,88 @@ pub fn on_ac_power() -> f64 {
             1.0
         }
     }
+}
+
+/// Live battery state and per-core CPU frequency telemetry from `powrprof.dll`
+/// (`CallNtPowerInformation`), requiring zero elevation and zero kernel drivers.
+#[derive(Debug, Clone, Copy)]
+pub struct PowerTelemetry {
+    pub battery_present: bool,
+    pub battery_pct: f64,
+    pub battery_rate_w: f64,
+    pub battery_charging: bool,
+    pub battery_discharging: bool,
+    pub cpu_mhz: f64,
+    pub cpu_max_mhz: f64,
+    pub cpu_mhz_limit: f64,
+}
+
+impl Default for PowerTelemetry {
+    fn default() -> Self {
+        Self {
+            battery_present: false,
+            battery_pct: f64::NAN,
+            battery_rate_w: f64::NAN,
+            battery_charging: false,
+            battery_discharging: false,
+            cpu_mhz: f64::NAN,
+            cpu_max_mhz: f64::NAN,
+            cpu_mhz_limit: f64::NAN,
+        }
+    }
+}
+
+/// Query battery charge/wattage (`SystemBatteryState = 5`) and CPU frequencies (`ProcessorInformation = 11`).
+pub fn power_telemetry() -> PowerTelemetry {
+    const SYSTEM_BATTERY_STATE_LEVEL: i32 = 5;
+    const PROCESSOR_INFORMATION_LEVEL: i32 = 11;
+
+    let mut out = PowerTelemetry::default();
+    unsafe {
+        let mut bat = SYSTEM_BATTERY_STATE::default();
+        let st_bat = CallNtPowerInformation(
+            SYSTEM_BATTERY_STATE_LEVEL,
+            null_mut(),
+            0,
+            (&mut bat as *mut SYSTEM_BATTERY_STATE).cast(),
+            size_of::<SYSTEM_BATTERY_STATE>() as u32,
+        );
+        if st_bat == 0 && bat.BatteryPresent != 0 && bat.MaxCapacity > 0 {
+            out.battery_present = true;
+            out.battery_pct = ((bat.RemainingCapacity as f64) / (bat.MaxCapacity as f64) * 100.0)
+                .clamp(0.0, 100.0);
+            out.battery_charging = bat.Charging != 0;
+            out.battery_discharging = bat.Discharging != 0;
+            // BATTERY_UNKNOWN_RATE is i32::MIN (0x80000000); guard absurd/unknown readings.
+            if bat.Rate != i32::MIN && bat.Rate.saturating_abs() <= 500_000 {
+                out.battery_rate_w = (bat.Rate as f64) / 1000.0;
+            }
+        }
+
+        let n_cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .clamp(1, 512);
+        let mut cpus = vec![PROCESSOR_POWER_INFORMATION::default(); n_cpus];
+        let st_cpu = CallNtPowerInformation(
+            PROCESSOR_INFORMATION_LEVEL,
+            null_mut(),
+            0,
+            cpus.as_mut_ptr().cast(),
+            (size_of::<PROCESSOR_POWER_INFORMATION>() * n_cpus) as u32,
+        );
+        if st_cpu == 0 {
+            let valid: Vec<&PROCESSOR_POWER_INFORMATION> =
+                cpus.iter().filter(|c| c.MaxMhz > 0).collect();
+            if !valid.is_empty() {
+                let cnt = valid.len() as f64;
+                out.cpu_mhz = valid.iter().map(|c| c.CurrentMhz as f64).sum::<f64>() / cnt;
+                out.cpu_max_mhz = valid.iter().map(|c| c.MaxMhz as f64).sum::<f64>() / cnt;
+                out.cpu_mhz_limit = valid.iter().map(|c| c.MhzLimit as f64).sum::<f64>() / cnt;
+            }
+        }
+    }
+    out
 }
 
 /// Seconds since the user last touched keyboard or mouse.

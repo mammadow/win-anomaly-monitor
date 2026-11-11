@@ -240,10 +240,31 @@ fn draw_dashboard(
     let ns = get_metric_or(s, "net_sent_bps", 0.0);
     let nr = get_metric_or(s, "net_recv_bps", 0.0);
     let free_gb = get_metric_or(s, "disk_free_gb", 0.0);
-    let on_ac = if get_metric_or(s, "on_ac", 1.0) >= 0.5 {
-        "AC"
+    let is_ac = get_metric_or(s, "on_ac", 1.0) >= 0.5;
+    let bat_pct = get_metric(s, "battery_pct");
+    let bat_w = get_metric(s, "battery_rate_w");
+    let on_ac = if bat_pct.is_finite() {
+        if is_ac {
+            if bat_w.is_finite() && bat_w.abs() >= 0.5 {
+                format!("AC {:.0}% {:+.0}W", bat_pct, bat_w)
+            } else {
+                format!("AC {:.0}%", bat_pct)
+            }
+        } else if bat_w.is_finite() && bat_w.abs() >= 0.5 {
+            format!("Bat {:.0}% {:+.0}W", bat_pct, bat_w)
+        } else {
+            format!("Bat {:.0}%", bat_pct)
+        }
+    } else if is_ac {
+        "AC".to_string()
     } else {
-        "Battery"
+        "Battery".to_string()
+    };
+    let cpu_mhz = get_metric(s, "cpu_mhz");
+    let mhz_str = if cpu_mhz.is_finite() && cpu_mhz > 0.0 {
+        format!(" | {:.2}GHz", cpu_mhz / 1000.0)
+    } else {
+        String::new()
     };
     let gpu_awake = get_metric(s, "gpu_awake");
     let gpu_str = if !gpu_awake.is_finite() {
@@ -272,9 +293,10 @@ fn draw_dashboard(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
-            " DPC+ISR: {:.1}% | Faults: {:.0}/s | Disk: {} R / {} W | Net: {} ↓ / {} ↑ | Free: {:.1} GB ({})",
+            " DPC+ISR: {:.1}% | Faults: {:.0}/s{} | Disk: {} R / {} W | Net: {} ↓ / {} ↑ | Free: {:.1} GB ({})",
             dpc + isr,
             hf,
+            mhz_str,
             fmt_bytes(dr, true),
             fmt_bytes(dw, true),
             fmt_bytes(nr, true),

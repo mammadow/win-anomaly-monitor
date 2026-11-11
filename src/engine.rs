@@ -4,7 +4,7 @@
 use crate::config::MonitorConfig;
 use crate::detector::{AnomalyModel, Trainer};
 use crate::events::{EventManager, EventSink, LiveEventSink};
-use crate::features::{get_metric_or, MetricMap, WindowAggregator};
+use crate::features::{get_metric, get_metric_or, MetricMap, WindowAggregator};
 use crate::processes::ProcessTracker;
 use crate::responsiveness::ResponsivenessProbe;
 use crate::rules::{summarize_rates, MonitorContext, RuleEngine};
@@ -323,11 +323,23 @@ impl Monitor {
             self.core.storage.flush();
             self.write_state(&s, now);
             if let Some(ref tray) = self.tray {
+                let bat = get_metric(&s, "battery_pct");
+                let bat_w = get_metric(&s, "battery_rate_w");
+                let pwr_tag = if bat.is_finite() {
+                    if bat_w.is_finite() && bat_w.abs() >= 0.5 {
+                        format!(" | Bat {:.0}% ({:+.0}W)", bat, bat_w)
+                    } else {
+                        format!(" | Bat {:.0}%", bat)
+                    }
+                } else {
+                    String::new()
+                };
                 let tip = format!(
-                    "resmon v4.0 — CPU {:.0}%, RAM {:.0}%, Commit {:.0}% ({} active alerts)",
+                    "resmon v4.0 — CPU {:.0}%, RAM {:.0}%, Commit {:.0}%{} ({} alerts)",
                     get_metric_or(&s, "cpu_pct", 0.0),
                     get_metric_or(&s, "ram_pct", 0.0),
                     get_metric_or(&s, "commit_pct", 0.0),
+                    pwr_tag,
                     self.core.events.open_events.len()
                 );
                 tray.set_tooltip(&tip);

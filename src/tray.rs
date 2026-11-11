@@ -33,6 +33,13 @@ const NIIF_WARNING: DWORD = 0x00000002;
 const NIIF_ERROR: DWORD = 0x00000003;
 
 const IDI_APPLICATION: *const u16 = 32512 as *const u16;
+const IMAGE_ICON: u32 = 1;
+const LR_DEFAULTCOLOR: u32 = 0x0000_0000;
+const LR_SHARED: u32 = 0x0000_8000;
+const SM_CXICON: i32 = 11;
+const SM_CYICON: i32 = 12;
+const SM_CXSMICON: i32 = 49;
+const SM_CYSMICON: i32 = 50;
 const MF_STRING: u32 = 0x00000000;
 const MF_SEPARATOR: u32 = 0x00000800;
 const TPM_BOTTOMALIGN: u32 = 0x0020;
@@ -126,6 +133,15 @@ extern "system" {
     fn DispatchMessageW(lpMsg: *const MSG) -> isize;
     fn DestroyWindow(hWnd: HWND) -> BOOL;
     fn LoadIconW(hInstance: HANDLE, lpIconName: *const u16) -> HANDLE;
+    fn LoadImageW(
+        hInst: HANDLE,
+        name: *const u16,
+        r#type: u32,
+        cx: i32,
+        cy: i32,
+        fuLoad: u32,
+    ) -> HANDLE;
+    fn GetSystemMetrics(nIndex: i32) -> i32;
     fn CreatePopupMenu() -> HANDLE;
     fn AppendMenuW(hMenu: HANDLE, uFlags: u32, uIDNewItem: usize, lpNewItem: *const u16) -> BOOL;
     fn TrackPopupMenu(
@@ -152,9 +168,31 @@ extern "system" {
     fn GetModuleHandleW(lpModuleName: *const u16) -> HANDLE;
 }
 
-unsafe fn load_app_icon() -> HANDLE {
+unsafe fn load_app_icon(small: bool) -> HANDLE {
     let hmod = GetModuleHandleW(null());
     if !hmod.is_null() {
+        let (cx, cy) = if small {
+            (
+                GetSystemMetrics(SM_CXSMICON).max(16),
+                GetSystemMetrics(SM_CYSMICON).max(16),
+            )
+        } else {
+            (
+                GetSystemMetrics(SM_CXICON).max(32),
+                GetSystemMetrics(SM_CYICON).max(32),
+            )
+        };
+        let sized = LoadImageW(
+            hmod,
+            std::ptr::without_provenance::<u16>(1),
+            IMAGE_ICON,
+            cx,
+            cy,
+            LR_DEFAULTCOLOR | LR_SHARED,
+        );
+        if !sized.is_null() {
+            return sized;
+        }
         let icon = LoadIconW(hmod, std::ptr::without_provenance::<u16>(1));
         if !icon.is_null() {
             return icon;
@@ -394,13 +432,13 @@ pub fn show_balloon_notification(title: &str, body: &str, severity: &str) {
                 lpfnWndProc: DefWindowProcW,
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: null_mut(),
-                hIcon: null_mut(),
+                hInstance: GetModuleHandleW(null()),
+                hIcon: load_app_icon(false),
                 hCursor: null_mut(),
                 hbrBackground: null_mut(),
                 lpszMenuName: null(),
                 lpszClassName: cls_name.as_ptr(),
-                hIconSm: null_mut(),
+                hIconSm: load_app_icon(true),
             };
             let _ = RegisterClassExW(&wc);
             let hwnd = CreateWindowExW(
@@ -425,7 +463,7 @@ pub fn show_balloon_notification(title: &str, body: &str, severity: &str) {
             nid.hWnd = hwnd;
             nid.uID = 2;
             nid.uFlags = NIF_ICON | NIF_TIP | NIF_INFO;
-            nid.hIcon = load_app_icon();
+            nid.hIcon = load_app_icon(true);
             fill_wide(&mut nid.szTip, "resmon v4.0");
             apply_balloon_fields(&mut nid, &t, &b, &s);
             let _ = Shell_NotifyIconW(NIM_ADD, &mut nid);
@@ -485,13 +523,13 @@ fn tray_thread_main(
             lpfnWndProc: tray_wnd_proc,
             cbClsExtra: 0,
             cbWndExtra: 0,
-            hInstance: null_mut(),
-            hIcon: null_mut(),
+            hInstance: GetModuleHandleW(null()),
+            hIcon: load_app_icon(false),
             hCursor: null_mut(),
             hbrBackground: null_mut(),
             lpszMenuName: null(),
             lpszClassName: cls_name.as_ptr(),
-            hIconSm: null_mut(),
+            hIconSm: load_app_icon(true),
         };
         let _ = RegisterClassExW(&wc);
 
@@ -519,7 +557,7 @@ fn tray_thread_main(
         nid.uID = 1;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_TRAYICON;
-        nid.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+        nid.hIcon = load_app_icon(true);
         fill_wide(&mut nid.szTip, "resmon v4.0 — Running");
         let _ = Shell_NotifyIconW(NIM_ADD, &mut nid);
         TRAY_ACTIVE.store(true, Ordering::SeqCst);

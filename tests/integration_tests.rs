@@ -15,8 +15,8 @@ use resmon::processes::{ProcStats, ProcessTracker};
 use resmon::replay::{replay, tune_grid, ReplayMonitor};
 use resmon::responsiveness::{ResponsivenessProbe, Stall, StallTracker};
 use resmon::rules::{
-    trend, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, LowDiskSpace, MemoryPressure, UiFreeze,
-    UploadBurst,
+    summarize_rates, trend, BackgroundCpu, GpuAwakeOnBattery, GpuThermal, LowDiskSpace,
+    MemoryPressure, UiFreeze, UploadBurst,
 };
 use resmon::sampler::{unix_now, SystemSampler};
 use resmon::storage::{db_summary, Storage};
@@ -666,4 +666,20 @@ fn test_native_rust_avx2_ecoqos_nvml_and_throttle_benefits() {
     let mut pt_no_cmd = ProcessTracker::new(30.0);
     pt_no_cmd.cmdline_attribution = false;
     let _ = pt_no_cmd.sweep(unix_now());
+
+    // 6. Verify powrprof PowerTelemetry (CPU clocks + battery if present) and rate summary formatting
+    let pwr = winapi::power_telemetry();
+    assert!(pwr.cpu_mhz.is_nan() || pwr.cpu_mhz > 0.0);
+    assert!(pwr.battery_pct.is_nan() || (0.0..=100.0).contains(&pwr.battery_pct));
+
+    let mut summary_sample = make_sample(300.0, 22.0, 61.0);
+    summary_sample.insert("on_ac".to_string(), 0.0);
+    summary_sample.insert("battery_pct".to_string(), 74.0);
+    summary_sample.insert("battery_rate_w".to_string(), -18.5);
+    summary_sample.insert("cpu_mhz".to_string(), 1950.0);
+    summary_sample.insert("cpu_max_mhz".to_string(), 2200.0);
+    summary_sample.insert("cpu_mhz_limit".to_string(), 1800.0);
+    let summary = summarize_rates(&summary_sample);
+    assert!(summary.contains("1.95 GHz [cap 1.80]"), "{}", summary);
+    assert!(summary.contains("battery 74% (-18.5 W)"), "{}", summary);
 }

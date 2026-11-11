@@ -1838,10 +1838,51 @@ pub fn summarize_rates(s: &MetricMap) -> String {
             get_metric_or(s, "gpu_power_w", 0.0)
         )
     };
-    let pwr = if get_metric_or(s, "on_ac", 1.0) >= 0.5 {
-        "AC"
+    let is_ac = get_metric_or(s, "on_ac", 1.0) >= 0.5;
+    let bat_pct = get_metric(s, "battery_pct");
+    let bat_w = get_metric(s, "battery_rate_w");
+    let pwr = if bat_pct.is_finite() {
+        let base = if is_ac {
+            format!("AC ({:.0}%", bat_pct)
+        } else {
+            format!("battery {:.0}%", bat_pct)
+        };
+        let rate_note = if bat_w.is_finite() && bat_w.abs() >= 0.5 {
+            if is_ac {
+                format!(", {:+.1} W)", bat_w)
+            } else {
+                format!(" ({:+.1} W)", bat_w)
+            }
+        } else if is_ac {
+            ")".to_string()
+        } else {
+            String::new()
+        };
+        format!("{}{}", base, rate_note)
+    } else if is_ac {
+        "AC".to_string()
     } else {
-        "battery"
+        "battery".to_string()
+    };
+    let cpu_mhz = get_metric(s, "cpu_mhz");
+    let cpu_max_mhz = get_metric(s, "cpu_max_mhz");
+    let cpu_lim_mhz = get_metric(s, "cpu_mhz_limit");
+    let freq_str = if cpu_mhz.is_finite() && cpu_mhz > 0.0 {
+        if cpu_max_mhz.is_finite()
+            && cpu_lim_mhz.is_finite()
+            && cpu_max_mhz > 0.0
+            && cpu_lim_mhz < cpu_max_mhz * 0.92
+        {
+            format!(
+                " @ {:.2} GHz [cap {:.2}]",
+                cpu_mhz / 1000.0,
+                cpu_lim_mhz / 1000.0
+            )
+        } else {
+            format!(" @ {:.2} GHz", cpu_mhz / 1000.0)
+        }
+    } else {
+        String::new()
     };
     let hf = get_metric_or(s, "hard_faults_ps", 0.0);
     let hf_str = if hf >= 10.0 {
@@ -1850,8 +1891,9 @@ pub fn summarize_rates(s: &MetricMap) -> String {
         String::new()
     };
     format!(
-        "CPU {:.0}% (busiest core {:.0}%), RAM {:.0}%, commit {:.0}%{}, disk {} read / {} write, net {} down / {} up, GPU {}, {}",
+        "CPU {:.0}%{} (busiest core {:.0}%), RAM {:.0}%, commit {:.0}%{}, disk {} read / {} write, net {} down / {} up, GPU {}, {}",
         get_metric_or(s, "cpu_pct", 0.0),
+        freq_str,
         get_metric_or(s, "core_max_pct", 0.0),
         get_metric_or(s, "ram_pct", 0.0),
         get_metric_or(s, "commit_pct", 0.0),

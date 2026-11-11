@@ -122,109 +122,227 @@ fn to_space_safe_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-/// Generate a crisp 32x32 32-bit ARGB ICO featuring a dark slate circle + teal ECG pulse line.
+/// Generate a crisp multi-resolution (`16, 20, 24, 32, 48, 64, 128`) 32-bit ARGB ICO
+/// featuring a 4x4 supersampled midnight-navy squircle badge, bright cyan border,
+/// and glowing telemetry ECG waveform.
 fn generate_resmon_ico() -> Vec<u8> {
-    const W: usize = 32;
-    const H: usize = 32;
-    let mut bgra = vec![0u8; W * H * 4];
+    const SIZES: [usize; 7] = [16, 20, 24, 32, 48, 64, 128];
 
-    // Background badge: rounded dark slate square (#0F172A) with cyan border (#06B6D4)
-    let cx = 15.5f32;
-    let cy = 15.5f32;
-    for y in 0..H {
-        for x in 0..W {
-            let dx = (x as f32 - cx).abs();
-            let dy = (y as f32 - cy).abs();
-            let r = dx.max(dy);
-            let idx = (y * W + x) * 4;
-            if r <= 14.5 {
-                let border = r >= 12.6;
-                let (b, g, red, a) = if border {
-                    (212u8, 182u8, 6u8, 255u8) // Cyan border
-                } else {
-                    (42u8, 23u8, 15u8, 255u8) // Slate body
-                };
-                bgra[idx] = b;
-                bgra[idx + 1] = g;
-                bgra[idx + 2] = red;
-                bgra[idx + 3] = a;
-            }
-        }
+    struct EncodedFrame {
+        size: usize,
+        dib: Vec<u8>,
     }
 
-    // Telemetry ECG waveform across y in top-down coordinates
-    let pts: [(f32, f32); 9] = [
-        (4.0, 16.0),
-        (9.5, 16.0),
-        (12.0, 11.0),
-        (14.5, 22.0),
-        (17.5, 7.0),
-        (20.0, 20.0),
-        (22.0, 16.0),
-        (27.5, 16.0),
-        (27.5, 16.0),
-    ];
-    for seg in pts.windows(2) {
-        let (x0, y0) = seg[0];
-        let (x1, y1) = seg[1];
-        let steps = 40;
-        for step in 0..=steps {
-            let t = (step as f32) / (steps as f32);
-            let px = x0 + (x1 - x0) * t;
-            let py = y0 + (y1 - y0) * t;
-            for oy in -1i32..=1 {
-                for ox in -1i32..=1 {
-                    let ix = px.round() as i32 + ox;
-                    let iy = py.round() as i32 + oy;
-                    if (0..W as i32).contains(&ix) && (0..H as i32).contains(&iy) {
-                        let dist = ox * ox + oy * oy;
-                        if dist <= 1 {
-                            let idx = ((iy as usize) * W + (ix as usize)) * 4;
-                            // Bright cyan/emerald pulse (#34D399 / #22D3EE)
-                            bgra[idx] = 238;
-                            bgra[idx + 1] = 230;
-                            bgra[idx + 2] = 56;
-                            bgra[idx + 3] = 255;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let frames: Vec<EncodedFrame> = SIZES
+        .iter()
+        .map(|&size| EncodedFrame {
+            size,
+            dib: encode_ico_dib(size, &render_icon_rgba(size)),
+        })
+        .collect();
 
-    // ICO format stores BMP bottom-up (H rows reversed) + 1-bpp AND mask
-    let dib_size = 40 + W * H * 4 + (W * H / 8);
-    let mut out = Vec::with_capacity(6 + 16 + dib_size);
+    let count = frames.len();
+    let header_bytes = 6 + count * 16;
+    let total_bytes: usize = header_bytes + frames.iter().map(|f| f.dib.len()).sum::<usize>();
+    let mut out = Vec::with_capacity(total_bytes);
+
     // ICONDIR header
     out.extend_from_slice(&0u16.to_le_bytes()); // reserved
     out.extend_from_slice(&1u16.to_le_bytes()); // type = ICO
-    out.extend_from_slice(&1u16.to_le_bytes()); // count = 1
-                                                // ICONDIRENTRY
-    out.push(W as u8);
-    out.push(H as u8);
-    out.push(0); // color count
-    out.push(0); // reserved
-    out.extend_from_slice(&1u16.to_le_bytes()); // planes
-    out.extend_from_slice(&32u16.to_le_bytes()); // bpp
-    out.extend_from_slice(&(dib_size as u32).to_le_bytes());
-    out.extend_from_slice(&22u32.to_le_bytes()); // offset
-                                                 // BITMAPINFOHEADER
-    out.extend_from_slice(&40u32.to_le_bytes());
-    out.extend_from_slice(&(W as i32).to_le_bytes());
-    out.extend_from_slice(&((H * 2) as i32).to_le_bytes()); // height * 2 for XOR + AND masks
-    out.extend_from_slice(&1u16.to_le_bytes()); // planes
-    out.extend_from_slice(&32u16.to_le_bytes()); // bpp
-    out.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
-    out.extend_from_slice(&((W * H * 4) as u32).to_le_bytes());
-    out.extend_from_slice(&[0u8; 16]);
-    // Bottom-up pixel rows
-    for y in (0..H).rev() {
-        let row = &bgra[y * W * 4..(y + 1) * W * 4];
-        out.extend_from_slice(row);
+    out.extend_from_slice(&(count as u16).to_le_bytes());
+
+    let mut offset = header_bytes as u32;
+    for f in &frames {
+        let dim = if f.size >= 256 { 0u8 } else { f.size as u8 };
+        out.push(dim); // bWidth
+        out.push(dim); // bHeight
+        out.push(0); // bColorCount
+        out.push(0); // bReserved
+        out.extend_from_slice(&1u16.to_le_bytes()); // wPlanes
+        out.extend_from_slice(&32u16.to_le_bytes()); // wBitCount
+        out.extend_from_slice(&(f.dib.len() as u32).to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        offset += f.dib.len() as u32;
     }
-    // 1-bpp AND mask (all 0s; alpha channel governs transparency)
-    out.extend(std::iter::repeat_n(0u8, W * H / 8));
+
+    for f in &frames {
+        out.extend_from_slice(&f.dib);
+    }
     out
+}
+
+fn encode_ico_dib(size: usize, bgra: &[u8]) -> Vec<u8> {
+    let xor_bytes = size * size * 4;
+    // ICO 1-bpp AND mask scanlines MUST be 32-bit (4-byte) DWORD aligned.
+    let and_stride = (size.div_ceil(32)) * 4;
+    let and_bytes = and_stride * size;
+    let mut dib = Vec::with_capacity(40 + xor_bytes + and_bytes);
+
+    // BITMAPINFOHEADER
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(size as i32).to_le_bytes());
+    dib.extend_from_slice(&((size * 2) as i32).to_le_bytes()); // height * 2 for XOR + AND masks
+    dib.extend_from_slice(&1u16.to_le_bytes()); // planes
+    dib.extend_from_slice(&32u16.to_le_bytes()); // bpp
+    dib.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+    dib.extend_from_slice(&(xor_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&[0u8; 16]);
+
+    // Bottom-up pixel rows
+    for y in (0..size).rev() {
+        dib.extend_from_slice(&bgra[y * size * 4..(y + 1) * size * 4]);
+    }
+
+    // Bottom-up 1-bpp AND mask: 1 = fully transparent pixel, 0 = opaque / alpha-blended
+    let mut and_row = vec![0u8; and_stride];
+    for y in (0..size).rev() {
+        and_row.fill(0);
+        for x in 0..size {
+            let alpha = bgra[(y * size + x) * 4 + 3];
+            if alpha == 0 {
+                and_row[x / 8] |= 0x80 >> (x % 8);
+            }
+        }
+        dib.extend_from_slice(&and_row);
+    }
+    dib
+}
+
+fn rounded_box_sdf(px: f32, py: f32, half_extent: f32, radius: f32) -> f32 {
+    let qx = px.abs() - (half_extent - radius);
+    let qy = py.abs() - (half_extent - radius);
+    let out_dist = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+    let in_dist = qx.max(qy).min(0.0);
+    out_dist + in_dist - radius
+}
+
+fn seg_dist(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
+    let vx = x1 - x0;
+    let vy = y1 - y0;
+    let len_sq = vx * vx + vy * vy;
+    if len_sq <= 1e-8 {
+        return ((px - x0).powi(2) + (py - y0).powi(2)).sqrt();
+    }
+    let t = (((px - x0) * vx + (py - y0) * vy) / len_sq).clamp(0.0, 1.0);
+    let proj_x = x0 + vx * t;
+    let proj_y = y0 + vy * t;
+    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn render_icon_rgba(size: usize) -> Vec<u8> {
+    // 4x4 subpixel MSAA grid keeps edges & thin 16x16 telemetry peaks sharp
+    const SUB: usize = 4;
+    let mut bgra = vec![0u8; size * size * 4];
+    let inv_size = 2.0 / (size as f32);
+    let inv_sub = 1.0 / (SUB as f32);
+
+    // Keep stroke & rim clearly visible even at 16x16 taskbar tray scale
+    let px_unit = 2.0 / (size as f32);
+    let border_w = (px_unit * 1.15).max(0.115);
+    let core_r = (px_unit * 0.92).max(0.082);
+    let glow_r = core_r * 2.15;
+
+    let ecg_pts: [(f32, f32); 8] = [
+        (-0.64, 0.04),
+        (-0.34, 0.04),
+        (-0.19, -0.22),
+        (-0.04, 0.36),
+        (0.11, -0.50),
+        (0.26, 0.28),
+        (0.39, 0.04),
+        (0.64, 0.04),
+    ];
+
+    for y in 0..size {
+        for x in 0..size {
+            let mut acc_r = 0.0f32;
+            let mut acc_g = 0.0f32;
+            let mut acc_b = 0.0f32;
+            let mut acc_a = 0.0f32;
+
+            for sy in 0..SUB {
+                for sx in 0..SUB {
+                    let fx = (x as f32) + ((sx as f32) + 0.5) * inv_sub;
+                    let fy = (y as f32) + ((sy as f32) + 0.5) * inv_sub;
+                    let nx = fx * inv_size - 1.0;
+                    let ny = fy * inv_size - 1.0;
+
+                    let sd = rounded_box_sdf(nx, ny, 0.90, 0.34);
+                    if sd > px_unit * 0.65 {
+                        continue;
+                    }
+                    let shape_cov = 1.0 - smoothstep(-px_unit * 0.5, px_unit * 0.5, sd);
+                    if shape_cov <= 0.0 {
+                        continue;
+                    }
+
+                    // Midnight-navy top-to-bottom interior gradient
+                    let grad_t = ((ny + 0.90) / 1.80).clamp(0.0, 1.0);
+                    let mut r = 20.0 * (1.0 - grad_t) + 10.0 * grad_t;
+                    let mut g = 33.0 * (1.0 - grad_t) + 18.0 * grad_t;
+                    let mut b = 61.0 * (1.0 - grad_t) + 36.0 * grad_t;
+
+                    // Crisp electric-cyan outer rim (#06B6D4 -> #38BDF8)
+                    let rim_t =
+                        smoothstep(-border_w - px_unit * 0.45, -border_w + px_unit * 0.45, sd);
+                    if rim_t > 0.0 {
+                        let rim_r = 34.0 * (1.0 - grad_t) + 6.0 * grad_t;
+                        let rim_g = 211.0 * (1.0 - grad_t) + 182.0 * grad_t;
+                        let rim_b = 238.0 * (1.0 - grad_t) + 212.0 * grad_t;
+                        r = r * (1.0 - rim_t) + rim_r * rim_t;
+                        g = g * (1.0 - rim_t) + rim_g * rim_t;
+                        b = b * (1.0 - rim_t) + rim_b * rim_t;
+                    }
+
+                    // ECG waveform glow + luminous mint-white core
+                    let mut min_d = f32::MAX;
+                    for seg in ecg_pts.windows(2) {
+                        min_d = min_d.min(seg_dist(nx, ny, seg[0].0, seg[0].1, seg[1].0, seg[1].1));
+                    }
+                    let glow_t = (1.0 - smoothstep(core_r * 0.7, glow_r, min_d)) * 0.45;
+                    if glow_t > 0.0 {
+                        r = r * (1.0 - glow_t) + 16.0 * glow_t;
+                        g = g * (1.0 - glow_t) + 220.0 * glow_t;
+                        b = b * (1.0 - glow_t) + 235.0 * glow_t;
+                    }
+                    let wave_t =
+                        1.0 - smoothstep(core_r - px_unit * 0.35, core_r + px_unit * 0.35, min_d);
+                    if wave_t > 0.0 {
+                        // Subtle left-to-right cyan -> bright emerald-mint highlight
+                        let wt = ((nx + 0.64) / 1.28).clamp(0.0, 1.0);
+                        let wr = 110.0 * (1.0 - wt) + 150.0 * wt;
+                        let wg = 242.0 * (1.0 - wt) + 255.0 * wt;
+                        let wb = 255.0 * (1.0 - wt) + 225.0 * wt;
+                        r = r * (1.0 - wave_t) + wr * wave_t;
+                        g = g * (1.0 - wave_t) + wg * wave_t;
+                        b = b * (1.0 - wave_t) + wb * wave_t;
+                    }
+
+                    acc_r += r * shape_cov;
+                    acc_g += g * shape_cov;
+                    acc_b += b * shape_cov;
+                    acc_a += shape_cov;
+                }
+            }
+
+            let samples = (SUB * SUB) as f32;
+            let a = (acc_a / samples).clamp(0.0, 1.0);
+            let idx = (y * size + x) * 4;
+            if a > 0.004 && acc_a > 0.0 {
+                // Convert back to straight (un-premultiplied) BGRA colors cleanly
+                bgra[idx] = (acc_b / acc_a).round().clamp(0.0, 255.0) as u8;
+                bgra[idx + 1] = (acc_g / acc_a).round().clamp(0.0, 255.0) as u8;
+                bgra[idx + 2] = (acc_r / acc_a).round().clamp(0.0, 255.0) as u8;
+                bgra[idx + 3] = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    bgra
 }
 
 const MANIFEST_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
